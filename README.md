@@ -49,28 +49,28 @@ Three autonomous AI agents collaborate sequentially — evaluating candidate Ind
 
 ```
 trip_planner/
-├── src/
+├── frontend/                        # Web Dashboard UI Assets
+│   ├── index.html                   # Glassmorphic user interface
+│   ├── style.css                    # Design tokens & responsive styles
+│   └── app.js                       # Frontend client & state management
+├── src/                             # Python Backend Package
 │   └── trip_planner/
 │       ├── __init__.py
 │       ├── crew.py                  # Wires agents, tasks, tools, and LLM together
 │       ├── main.py                  # CLI entrypoint
+│       ├── api/
+│       │   ├── __init__.py
+│       │   └── app.py               # FastAPI server and REST endpoints (/api/plan-trip, /api/health)
 │       ├── config/
 │       │   ├── agents.yaml          # Agent roles, goals, and backstories
 │       │   └── tasks.yaml           # Task descriptions, contexts, and expected outputs
 │       ├── schemas/
 │       │   ├── __init__.py
 │       │   └── models.py            # Pydantic data contracts (TripItinerary, CityGuide, CitySelection)
-│       ├── tools/
-│       │   ├── __init__.py
-│       │   ├── search_tools.py      # DuckDuckGo search BaseTool wrapper
-│       │   └── scrape_tools.py      # Web page scraping wrapper
-│       └── web/
+│       └── tools/
 │           ├── __init__.py
-│           ├── app.py               # FastAPI server and REST endpoints (/api/plan-trip, /api/health)
-│           └── static/
-│               ├── index.html       # Web UI dashboard
-│               ├── style.css        # Dark glassmorphic responsive styling
-│               └── app.js           # Frontend controller & reactive state
+│           ├── search_tools.py      # DuckDuckGo search BaseTool wrapper
+│           └── scrape_tools.py      # Web page scraping wrapper
 ├── tests/
 │   ├── test_crew.py                 # Crew wiring, task dependencies, and schema tests
 │   └── test_tools.py                # Search tool unit tests (mocked network calls)
@@ -136,7 +136,7 @@ TRIP_PLANNER_MODEL=groq/openai/gpt-oss-120b
 
 ```bash
 $env:PYTHONPATH='src'
-python -m trip_planner.web.app
+python -m trip_planner.api.app
 ```
 Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in your browser.
 
