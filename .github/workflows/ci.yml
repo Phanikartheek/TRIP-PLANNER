@@ -27,10 +27,10 @@ jobs:
 
       - name: Lint with Ruff
         run: |
-          ruff check src/ tests/
+          ruff check backend/
 
       - name: Run Test Suite
         env:
-          PYTHONPATH: src
+          PYTHONPATH: backend/src
         run: |
-          pytest tests/ -v
+          pytest backend/tests/ -v

@@ -35,9 +35,10 @@ app.add_middleware(
 
 # Locate frontend directory relative to project root
 API_DIR = Path(__file__).resolve().parent
-SRC_DIR = API_DIR.parent.parent
-PROJECT_ROOT = SRC_DIR.parent
+PROJECT_ROOT = API_DIR.parents[3]  # app.py -> api -> trip_planner -> src -> backend -> root
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
+if not FRONTEND_DIR.exists():
+    FRONTEND_DIR = Path.cwd() / "frontend"
 
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")

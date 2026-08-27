@@ -49,31 +49,32 @@ Three autonomous AI agents collaborate sequentially — evaluating candidate Ind
 
 ```
 trip_planner/
-├── frontend/                        # Web Dashboard UI Assets
+├── frontend/                        # 🎨 Web Dashboard UI Assets
 │   ├── index.html                   # Glassmorphic user interface
 │   ├── style.css                    # Design tokens & responsive styles
 │   └── app.js                       # Frontend client & state management
-├── src/                             # Python Backend Package
-│   └── trip_planner/
-│       ├── __init__.py
-│       ├── crew.py                  # Wires agents, tasks, tools, and LLM together
-│       ├── main.py                  # CLI entrypoint
-│       ├── api/
-│       │   ├── __init__.py
-│       │   └── app.py               # FastAPI server and REST endpoints (/api/plan-trip, /api/health)
-│       ├── config/
-│       │   ├── agents.yaml          # Agent roles, goals, and backstories
-│       │   └── tasks.yaml           # Task descriptions, contexts, and expected outputs
-│       ├── schemas/
-│       │   ├── __init__.py
-│       │   └── models.py            # Pydantic data contracts (TripItinerary, CityGuide, CitySelection)
-│       └── tools/
-│           ├── __init__.py
-│           ├── search_tools.py      # DuckDuckGo search BaseTool wrapper
-│           └── scrape_tools.py      # Web page scraping wrapper
-├── tests/
-│   ├── test_crew.py                 # Crew wiring, task dependencies, and schema tests
-│   └── test_tools.py                # Search tool unit tests (mocked network calls)
+├── backend/                         # ⚙️ Python Backend Package & Agents
+│   ├── src/
+│   │   └── trip_planner/
+│   │       ├── __init__.py
+│   │       ├── crew.py              # Wires agents, tasks, tools, and LLM together
+│   │       ├── main.py              # CLI entrypoint
+│   │       ├── api/
+│   │       │   ├── __init__.py
+│   │       │   └── app.py           # FastAPI server and REST endpoints (/api/plan-trip, /api/health)
+│   │       ├── config/
+│   │       │   ├── agents.yaml      # Agent roles, goals, and backstories
+│   │       │   └── tasks.yaml       # Task descriptions, contexts, and expected outputs
+│   │       ├── schemas/
+│   │       │   ├── __init__.py
+│   │       │   └── models.py        # Pydantic data contracts (TripItinerary, CityGuide, CitySelection)
+│   │       └── tools/
+│   │           ├── __init__.py
+│   │           ├── search_tools.py  # DuckDuckGo search BaseTool wrapper
+│   │           └── scrape_tools.py  # Web page scraping wrapper
+│   └── tests/
+│       ├── test_crew.py             # Crew wiring, task dependencies, and schema tests
+│       └── test_tools.py            # Search tool unit tests (mocked network calls)
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                   # GitHub Actions CI workflow
@@ -135,7 +136,7 @@ TRIP_PLANNER_MODEL=groq/openai/gpt-oss-120b
 ### Option A: Interactive Web Dashboard (Recommended)
 
 ```bash
-$env:PYTHONPATH='src'
+$env:PYTHONPATH='backend/src'
 python -m trip_planner.api.app
 ```
 Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in your browser.
@@ -146,7 +147,7 @@ Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in your browser.
 
 ```bash
 trip-planner
-# or: python -m trip_planner.main
+# or: $env:PYTHONPATH='backend/src'; python -m trip_planner.main
 ```
 
 You will be prompted for:
@@ -165,7 +166,8 @@ The terminal will stream agent execution and print a validated, structured `Trip
 Run the automated test suite to verify agent configurations, task wiring, and schema validation:
 
 ```bash
-pytest tests/ -v
+$env:PYTHONPATH='backend/src'
+pytest backend/tests/ -v
 ```
 
 All 11 unit tests run deterministically against mock search inputs and Pydantic validation contracts without invoking external LLM APIs.
