@@ -1,0 +1,49 @@
+select_city_task:
+  description: >-
+    Compare these candidate cities: {cities}. The traveler is departing
+    from {origin}, planning a {trip_length}-day trip, with interests in
+    {interests} and a total budget of {budget}. Search the web for
+    current weather/seasonal conditions (including Indian seasons/monsoons where applicable)
+    and typical daily costs in the traveler's stated budget currency for each candidate before deciding.
+    Pick exactly one city and justify the choice with specific insights.
+  expected_output: >-
+    A single recommended city with its country, a clear justification
+    referencing the traveler's interests and budget, the best time/season to
+    visit, the currency code, and an estimated daily budget.
+  agent: city_selector
+
+gather_city_info_task:
+  description: >-
+    For the city chosen in the previous task, research and compile:
+    the top attractions matched to the traveler's interests ({interests}),
+    notable local food/restaurants (including regional specialties and dietary preferences),
+    safety notes a visitor should know, and practical transportation tips (airport/railway station transfers,
+    local cabs, trains, metros, or scooter rentals). Use web search to ground this in current information.
+  expected_output: >-
+    A structured city guide: a list of top attractions each with a short
+    description and approximate cost in the specified currency, a list of local food
+    recommendations, a safety-notes paragraph, seasonal weather advice, and a transportation-tips
+    paragraph.
+  agent: local_expert
+  context:
+    - select_city_task
+
+plan_itinerary_task:
+  description: >-
+    Using the city selection and the local city guide already gathered,
+    build a day-by-day itinerary for the full {trip_length}-day trip.
+    Each day must have a theme, and a morning/afternoon/evening plan.
+    Ground activity choices in the attractions and food already researched.
+    Estimate per-day costs (estimated_cost) and total trip cost (total_estimated_cost)
+    strictly in the traveler's budget currency, staying within the overall budget of {budget}.
+    Ensure the total_estimated_cost is exactly equal to the arithmetic sum of the individual
+    estimated_cost values across all days. Provide a practical packing list
+    appropriate for the destination and season, and key transit advice.
+  expected_output: >-
+    A complete itinerary covering every day of the trip, with currency, total
+    estimated cost matching the sum of daily estimated costs, daily breakdowns,
+    transit advice, and a packing list matching the schema.
+  agent: travel_concierge
+  context:
+    - select_city_task
+    - gather_city_info_task
