@@ -13,12 +13,22 @@ Three autonomous AI agents collaborate sequentially — evaluating candidate Ind
   - `City Selection Expert`: Compares candidate cities against origin, duration, interests, seasonal weather, and budget to select the best destination.
   - `Local Tour Guide`: Curates attractions, regional cuisine/food recommendations, safety notes, and on-the-ground transit tips.
   - `Amazing Travel Concierge`: Assembles a structured day-by-day schedule with per-day cost estimates, total budget tracking, and packing suggestions.
-- **📄 Pydantic Schema Validation**: Every pipeline task is validated against rigid Pydantic models (`src/trip_planner/schemas/models.py`), ensuring predictable, machine-readable JSON deliverables rather than unstructured free text.
+- **📄 Pydantic Schema Validation & Cost Reconciliation**: Every pipeline task is validated against rigid Pydantic models (`src/trip_planner/schemas/models.py`) with currency-agnostic fields (`total_estimated_cost`, `estimated_cost`) and an automatic post-validator reconciling total cost with daily sums.
 - **⚡ Fast Inference via Groq**: Uses Groq LLMs via CrewAI's `LLM` class (LiteLLM-backed) for low-latency planning with zero paid LLM subscription requirement.
 - **🔍 Zero-Cost Search & Scraping Tools**: DuckDuckGo search integration and static HTML website scraping tools.
 - **🌐 Interactive Web Dashboard & REST API**: Full FastAPI server with a dark glassmorphic responsive UI, destination presets, dietary filter pills, and live agent execution progress tracking.
+- **🛡️ Phase 1 Allowlist Gate**: Backend validation on `/api/plan-trip` enforcing domestic Indian travel mode and rejecting unready international requests with clear Phase 2 messaging.
 - **💻 CLI Entrypoint**: Interactive terminal interface prompting for origin, candidate cities, interests, trip duration, and budget.
 - **🛡️ Built-in Rate Limit Resilience**: Automatic exponential retry backoff wrapper around Groq API calls.
+
+---
+
+## 📐 Design Decisions
+
+- **Groq via LiteLLM**: Chosen for ultra-low inference latency and generous free-tier token allowances, eliminating paid OpenAI subscription barriers while providing high-quality 120B parameter reasoning for complex multi-step planning.
+- **Config-Driven YAML Architecture**: Agent roles, backstories, and task prompts are isolated in `config/agents.yaml` and `config/tasks.yaml`. This cleanly decouples prompt tuning from Python orchestration logic, making agent behaviors easily auditable and maintainable.
+- **Pydantic Schema Validation & Arithmetic Reconciliation**: Rather than trusting LLMs with arithmetic summation, Pydantic data contracts enforce structured JSON deliverables and derive `total_estimated_cost` as the exact sum of daily line-item expenses.
+- **Strict Phase 1 Domestic Scope & API-Level Allowlist Gate**: Focused domain specialization delivers deep regional expertise (monsoon seasonality, train/flight routing, local cuisine) before international scaling. A strict API allowlist prevents bypass regardless of client-side state.
 
 ---
 
@@ -64,8 +74,11 @@ trip_planner/
 ├── tests/
 │   ├── test_crew.py                 # Crew wiring, task dependencies, and schema tests
 │   └── test_tools.py                # Search tool unit tests (mocked network calls)
+├── .github/
+│   └── workflows/
+│       └── ci.yml                   # GitHub Actions CI workflow
 ├── .env.example                     # Environment configuration template
-├── pyproject.toml                   # Project dependencies and packaging configuration
+├── pyproject.toml                   # Project dependencies, packaging, and tool configuration
 └── README.md                        # Documentation
 ```
 
@@ -91,6 +104,15 @@ source .venv/bin/activate    # macOS / Linux
 # Install dependencies in editable mode
 pip install -e ".[dev]"
 ```
+
+Dependencies installed via `pyproject.toml`:
+- `crewai[litellm]>=0.86.0`
+- `crewai-tools>=0.17.0`
+- `ddgs>=9.0.0`
+- `pydantic>=2.7.0`
+- `python-dotenv>=1.0.1`
+- `fastapi>=0.110.0`
+- `uvicorn>=0.29.0`
 
 ### 3. Environment Configuration
 
@@ -146,7 +168,7 @@ Run the automated test suite to verify agent configurations, task wiring, and sc
 pytest tests/ -v
 ```
 
-Tests cover deterministic pipeline wiring, tool attachments, and Pydantic validation contracts without making paid network calls.
+All 11 unit tests run deterministically against mock search inputs and Pydantic validation contracts without invoking external LLM APIs.
 
 ---
 
