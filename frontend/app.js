@@ -411,9 +411,37 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error(errorData.detail || `Server error (${response.status})`);
       }
 
-      const data = await response.json();
-      currentItinerary = data.itinerary;
-      
+      const initData = await response.json();
+      const jobId = initData.job_id;
+      if (!jobId) {
+        throw new Error('No job ID returned by server.');
+      }
+
+      // Poll /api/status/{job_id} every 3 seconds until completed or failed
+      let jobStatus = initData.status || 'pending';
+      let itineraryData = null;
+
+      while (jobStatus === 'pending' || jobStatus === 'running') {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        const statusRes = await fetch(`/api/status/${jobId}`);
+        if (!statusRes.ok) {
+          const errData = await statusRes.json().catch(() => ({}));
+          throw new Error(errData.detail || `Failed to check job status (${statusRes.status})`);
+        }
+
+        const statusData = await statusRes.json();
+        jobStatus = statusData.status;
+
+        if (jobStatus === 'complete') {
+          itineraryData = statusData.result;
+          break;
+        } else if (jobStatus === 'failed') {
+          throw new Error(statusData.error || 'Trip planning job failed on server.');
+        }
+      }
+
+      currentItinerary = itineraryData;
       finishAgentProgressAnimation();
       renderItinerary(currentItinerary, payload.budget, payload.currency);
       showToast('🎉 Your AI trip itinerary is ready!');

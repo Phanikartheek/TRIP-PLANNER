@@ -30,6 +30,15 @@ crewai.llms.cache.mark_cache_breakpoint = lambda m: m
 # Automatically retry when hitting provider rate limits (e.g. Groq free tier TPM)
 _original_llm_call = LLM.call
 
+def _parse_retry_after(err_msg: str) -> float | None:
+    match = re.search(r"try again in (?:(\d+)m)?([\d\.]+)s", err_msg, re.IGNORECASE)
+    if match:
+        minutes = float(match.group(1)) if match.group(1) else 0.0
+        seconds = float(match.group(2))
+        return (minutes * 60.0) + seconds + 2.0
+    return None
+
+
 def _resilient_llm_call(self, *args, **kwargs):
     max_retries = 8
     for attempt in range(max_retries):
@@ -38,11 +47,8 @@ def _resilient_llm_call(self, *args, **kwargs):
         except Exception as e:
             err_msg = str(e)
             if ("rate_limit" in err_msg.lower() or "429" in err_msg) and attempt < max_retries - 1:
-                match = re.search(r"try again in ([\d\.]+)s", err_msg, re.IGNORECASE)
-                if match:
-                    sleep_sec = float(match.group(1)) + 1.5
-                else:
-                    sleep_sec = 15.0 + (attempt * 5)
+                parsed_sleep = _parse_retry_after(err_msg)
+                sleep_sec = parsed_sleep if parsed_sleep is not None else (15.0 + (attempt * 10))
                 time.sleep(sleep_sec)
                 continue
             if "tool choice is none" in err_msg.lower() and kwargs.get("tools"):

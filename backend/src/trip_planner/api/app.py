@@ -5,6 +5,8 @@ and serving the frontend web dashboard.
 
 import asyncio
 import os
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +46,10 @@ if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 
+# In-memory job store mapping job_id -> {status, result, error, created_at, inputs}
+JOB_STORE: dict[str, dict[str, Any]] = {}
+
+
 class TripPlanRequest(BaseModel):
     origin: str = Field(..., description="Origin city / transport hub")
     cities: str = Field(..., description="Comma-separated candidate cities to evaluate")
@@ -54,11 +60,12 @@ class TripPlanRequest(BaseModel):
     travel_mode: str | None = Field(default="domestic", description="Travel mode (domestic vs international)")
 
 
-class TripPlanResponse(BaseModel):
-    success: bool
-    inputs: dict[str, Any]
-    itinerary: dict[str, Any] | None = None
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: str = Field(description="Job status: pending, running, complete, or failed")
+    result: dict[str, Any] | None = None
     error: str | None = None
+    created_at: float | None = None
 
 
 def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -82,6 +89,20 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
     return {"raw_output": str(result)}
 
 
+async def _execute_trip_job(job_id: str, inputs: dict[str, Any]) -> None:
+    """
+    Background worker task running the CrewAI pipeline and storing results.
+    """
+    JOB_STORE[job_id]["status"] = "running"
+    try:
+        itinerary_data = await asyncio.to_thread(_run_crew_sync, inputs)
+        JOB_STORE[job_id]["status"] = "complete"
+        JOB_STORE[job_id]["result"] = itinerary_data
+    except Exception as e:
+        JOB_STORE[job_id]["status"] = "failed"
+        JOB_STORE[job_id]["error"] = str(e)
+
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint to verify server and API key status."""
@@ -95,11 +116,11 @@ async def health_check():
     }
 
 
-@app.post("/api/plan-trip", response_model=TripPlanResponse)
+@app.post("/api/plan-trip", response_model=JobStatusResponse)
 async def plan_trip_endpoint(request: TripPlanRequest):
     """
-    Accepts trip parameters, runs the 3-agent CrewAI pipeline asynchronously,
-    and returns the structured, validated TripItinerary.
+    Accepts trip parameters, initializes an async background job,
+    and immediately returns a job_id for status polling.
     """
     raw_mode = (request.travel_mode or "").strip().lower()
     mode = raw_mode if raw_mode else "domestic"
@@ -129,20 +150,43 @@ async def plan_trip_endpoint(request: TripPlanRequest):
         "currency": request.currency,
     }
 
-    try:
-        # Offload multi-agent LLM execution to threadpool
-        itinerary_data = await asyncio.to_thread(_run_crew_sync, crew_inputs)
-        return TripPlanResponse(
-            success=True,
-            inputs=crew_inputs,
-            itinerary=itinerary_data,
-        )
-    except Exception as e:
-        return TripPlanResponse(
-            success=False,
-            inputs=crew_inputs,
-            error=str(e),
-        )
+    job_id = str(uuid.uuid4())
+    created_at = time.time()
+    JOB_STORE[job_id] = {
+        "job_id": job_id,
+        "status": "pending",
+        "result": None,
+        "error": None,
+        "created_at": created_at,
+        "inputs": crew_inputs,
+    }
+
+    # Kick off asynchronous background execution
+    asyncio.create_task(_execute_trip_job(job_id, crew_inputs))
+
+    return JobStatusResponse(
+        job_id=job_id,
+        status="pending",
+        created_at=created_at,
+    )
+
+
+@app.get("/api/status/{job_id}", response_model=JobStatusResponse)
+async def get_job_status(job_id: str):
+    """
+    Returns current status and results of a trip planning job.
+    """
+    if job_id not in JOB_STORE:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job = JOB_STORE[job_id]
+    return JobStatusResponse(
+        job_id=job_id,
+        status=job["status"],
+        result=job.get("result"),
+        error=job.get("error"),
+        created_at=job.get("created_at"),
+    )
 
 
 @app.get("/")
