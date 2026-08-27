@@ -11,10 +11,11 @@ express.
 """
 
 import os
-
+import re
 import time
-import litellm
+
 import crewai.llms.cache
+import litellm
 from crewai import LLM, Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task
 from dotenv import load_dotenv
@@ -25,8 +26,6 @@ from trip_planner.tools import DuckDuckGoSearchTool, build_scrape_tool
 load_dotenv()
 litellm.drop_params = True
 crewai.llms.cache.mark_cache_breakpoint = lambda m: m
-
-import re
 
 # Automatically retry when hitting provider rate limits (e.g. Groq free tier TPM)
 _original_llm_call = LLM.call
