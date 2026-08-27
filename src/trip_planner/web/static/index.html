@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Trip Planner | India & Global Multi-Agent Travel Engine</title>
+  <meta name="description" content="Plan domestic Indian getaways and international vacations with autonomous AI agents researching trains, weather, local delicacies, and structured itineraries.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🇮🇳</text></svg>">
+</head>
+<body>
+
+  <div class="app-container">
+    
+    <!-- Hero Header -->
+    <header class="header">
+      <div class="brand-badge">
+        <span class="badge-dot"></span>
+        <span>Multi-Agent AI Travel Engine</span>
+      </div>
+      <h1 class="main-title">Craft Your Dream Itinerary</h1>
+      <p class="sub-title">
+        Autonomous AI agents research train & flight routes, seasonal weather, iconic regional cuisine, and local gems to design a realistic vacation tailored to your budget.
+      </p>
+
+      <!-- Scope Switcher: India First vs International (Phase 2 Preview) -->
+      <div class="mode-toggle-container">
+        <button type="button" class="mode-btn active" id="mode-domestic" data-mode="domestic">
+          <span class="mode-flag">🇮🇳</span>
+          <span class="mode-text">
+            <strong>Explore India</strong>
+            <small>Domestic Escapes (INR ₹)</small>
+          </span>
+        </button>
+        <button type="button" class="mode-btn disabled-mode" id="mode-international" data-mode="international" disabled title="Global destination planning is scheduled for Phase 2">
+          <span class="mode-flag">🌍</span>
+          <span class="mode-text">
+            <strong>Global Destinations</strong>
+            <small class="badge-phase2">🔒 Planned (Phase 2)</small>
+          </span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Configuration Card -->
+    <main class="glass-card" id="config-card">
+      
+      <!-- Top Bar: Category & Currency Config -->
+      <div class="card-top-controls">
+        <div class="currency-selector">
+          <label class="control-label">Currency:</label>
+          <div class="currency-pills" id="currency-pills">
+            <button type="button" class="curr-pill active" data-curr="INR">₹ INR</button>
+            <button type="button" class="curr-pill" data-curr="USD">$ USD</button>
+            <button type="button" class="curr-pill" data-curr="EUR">€ EUR</button>
+          </div>
+        </div>
+
+        <div class="travel-style-selector">
+          <label class="control-label">Travel Style:</label>
+          <select id="travel-style-select" class="custom-select">
+            <option value="standard">🚶 Balanced Explorer</option>
+            <option value="budget">🎒 Budget Backpacker</option>
+            <option value="family">👨‍👩‍👧‍👦 Family Friendly</option>
+            <option value="luxury">💎 Premium / Luxury</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Inspiration Presets Section -->
+      <section class="presets-section">
+        <div class="presets-label">
+          <span id="presets-heading">⚡ Curated Indian Destinations:</span>
+        </div>
+        <div class="presets-grid" id="presets-grid">
+          <!-- Dynamic Presets injected by JavaScript -->
+        </div>
+      </section>
+
+      <!-- Trip Configuration Form -->
+      <form id="trip-form">
+        <div class="form-grid">
+          
+          <!-- Origin City -->
+          <div class="form-group">
+            <label for="origin" class="input-label">
+              Departing From
+              <span class="input-hint">(Departure city or rail/airport hub)</span>
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">🛫</span>
+              <input 
+                type="text" 
+                id="origin" 
+                name="origin" 
+                class="form-input" 
+                placeholder="e.g. Bengaluru, Hyderabad, Delhi, Mumbai"
+                value="Bengaluru" 
+                required
+              >
+            </div>
+            <!-- Quick Hub Chips -->
+            <div class="quick-chips" id="origin-chips">
+              <span class="quick-chip" data-target="origin" data-value="Bengaluru">Bengaluru</span>
+              <span class="quick-chip" data-target="origin" data-value="Hyderabad">Hyderabad</span>
+              <span class="quick-chip" data-target="origin" data-value="Mumbai">Mumbai</span>
+              <span class="quick-chip" data-target="origin" data-value="Delhi NCR">Delhi NCR</span>
+              <span class="quick-chip" data-target="origin" data-value="Chennai">Chennai</span>
+              <span class="quick-chip" data-target="origin" data-value="Kolkata">Kolkata</span>
+            </div>
+          </div>
+
+          <!-- Candidate Cities -->
+          <div class="form-group">
+            <label for="cities" class="input-label">
+              Candidate Destinations
+              <span class="input-hint">(Cities for AI to evaluate)</span>
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">🗺️</span>
+              <input 
+                type="text" 
+                id="cities" 
+                name="cities" 
+                class="form-input" 
+                placeholder="e.g. Goa, Gokarna, Munnar, Manali" 
+                value="Goa, Gokarna, Munnar" 
+                required
+              >
+            </div>
+            <div class="input-subtext">The agent will research weather, connectivity, and pick the best single destination.</div>
+          </div>
+
+          <!-- Interests & Vibes -->
+          <div class="form-group form-group-full">
+            <label for="interests" class="input-label">
+              Interests & Travel Vibes
+              <span class="input-hint">(Select tags or enter custom preferences)</span>
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">🎨</span>
+              <input 
+                type="text" 
+                id="interests" 
+                name="interests" 
+                class="form-input" 
+                placeholder="hiking, street food, temples, waterfalls, photography" 
+                value="street food, nature, waterfalls, heritage" 
+                required
+              >
+            </div>
+            
+            <div class="tags-container" id="interests-tags">
+              <span class="interest-tag active" data-value="street food">🍜 Street Food & Dining</span>
+              <span class="interest-tag active" data-value="nature">🌿 Scenic Nature</span>
+              <span class="interest-tag active" data-value="waterfalls">💧 Waterfalls & Lakes</span>
+              <span class="interest-tag active" data-value="heritage">🏰 Heritage & Forts</span>
+              <span class="interest-tag" data-value="hiking">🥾 Hiking & Trails</span>
+              <span class="interest-tag" data-value="beaches">🏖️ Beaches & Sunsets</span>
+              <span class="interest-tag" data-value="temples">🛕 Temples & Spirituality</span>
+              <span class="interest-tag" data-value="coffee plantations">☕ Coffee & Tea Estates</span>
+              <span class="interest-tag" data-value="photography">📸 Photography Spots</span>
+              <span class="interest-tag" data-value="nightlife">🍸 Cafes & Nightlife</span>
+            </div>
+          </div>
+
+          <!-- Food / Dietary Preferences -->
+          <div class="form-group form-group-full">
+            <label class="input-label">
+              Food & Dining Preferences
+              <span class="input-hint">(Optional — tailored recommendations in itinerary)</span>
+            </label>
+            <div class="food-pills-container" id="food-pills">
+              <span class="food-pill active" data-food="No Restrictions">🍛 All Regional Foods</span>
+              <span class="food-pill" data-food="Pure Vegetarian">🥗 Pure Vegetarian</span>
+              <span class="food-pill" data-food="Jain Food">🪷 Jain Friendly</span>
+              <span class="food-pill" data-food="Authentic Street Food">🍢 Iconic Street Food</span>
+              <span class="food-pill" data-food="Coastal & Seafood">🦐 Coastal & Seafood</span>
+            </div>
+          </div>
+
+          <!-- Trip Length Slider -->
+          <div class="form-group">
+            <div class="slider-header">
+              <label for="trip_length" class="input-label">Trip Duration</label>
+              <span class="slider-val-badge" id="days-val">5 Days</span>
+            </div>
+            <input 
+              type="range" 
+              id="trip_length" 
+              name="trip_length" 
+              class="range-slider" 
+              min="1" 
+              max="15" 
+              value="5"
+            >
+          </div>
+
+          <!-- Budget Input with Currency -->
+          <div class="form-group">
+            <div class="slider-header">
+              <label for="budget" class="input-label">Total Estimated Budget</label>
+              <span class="slider-val-badge" id="budget-val">₹25,000</span>
+            </div>
+            <div class="input-wrapper">
+              <span class="input-icon" id="budget-currency-symbol">₹</span>
+              <input 
+                type="number" 
+                id="budget" 
+                name="budget" 
+                class="form-input" 
+                min="1000" 
+                step="500" 
+                value="25000" 
+                required
+              >
+            </div>
+            <!-- Quick Budget Increments -->
+            <div class="quick-chips" id="budget-chips">
+              <span class="quick-chip" data-target="budget" data-value="15000">₹15K</span>
+              <span class="quick-chip" data-target="budget" data-value="25000">₹25K</span>
+              <span class="quick-chip" data-target="budget" data-value="40000">₹40K</span>
+              <span class="quick-chip" data-target="budget" data-value="75000">₹75K</span>
+              <span class="quick-chip" data-target="budget" data-value="120000">₹1.2L</span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Submit Button -->
+        <button type="submit" class="btn-submit" id="submit-btn">
+          <span>✨ Plan Trip with Autonomous AI Agents</span>
+        </button>
+      </form>
+    </main>
+
+    <!-- Real-Time Agent Progress Tracker -->
+    <section class="glass-card tracker-card" id="agent-tracker">
+      <div class="tracker-header">
+        <h2 class="tracker-title">
+          <div class="spinner"></div>
+          <span>Autonomous AI Agents at Work</span>
+        </h2>
+        <span class="pipeline-badge">Sequential Multi-Agent Pipeline</span>
+      </div>
+
+      <div class="agents-pipeline">
+        <!-- Agent 1 -->
+        <div class="agent-step-card" id="agent-1">
+          <div class="agent-step-top">
+            <span class="agent-icon">🔍</span>
+            <span class="agent-status-badge">Waiting</span>
+          </div>
+          <div class="agent-name">1. City Selection Expert</div>
+          <div class="agent-desc">Compares weather, connectivity, seasonal pricing, and picks the best match.</div>
+        </div>
+
+        <!-- Agent 2 -->
+        <div class="agent-step-card" id="agent-2">
+          <div class="agent-step-top">
+            <span class="agent-icon">🧭</span>
+            <span class="agent-status-badge">Waiting</span>
+          </div>
+          <div class="agent-name">2. Local Tour Guide</div>
+          <div class="agent-desc">Discovers iconic attractions, authentic food gems, safety & transit options.</div>
+        </div>
+
+        <!-- Agent 3 -->
+        <div class="agent-step-card" id="agent-3">
+          <div class="agent-step-top">
+            <span class="agent-icon">✈️</span>
+            <span class="agent-status-badge">Waiting</span>
+          </div>
+          <div class="agent-name">3. Travel Concierge</div>
+          <div class="agent-desc">Builds validated day-by-day plan with cost breakdown and packing list.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Itinerary Results Section -->
+    <section class="glass-card results-card" id="results-section">
+      
+      <!-- Destination Showcase Banner -->
+      <div class="dest-banner">
+        <div class="dest-info">
+          <h2 class="dest-city" id="dest-city">Destination</h2>
+          <div class="dest-country" id="dest-country">📍 Country</div>
+          <div class="dest-actions-bar" id="dest-actions-bar">
+            <!-- Quick Links (Google Maps, IRCTC, Flights) -->
+          </div>
+        </div>
+        <div class="dest-metrics">
+          <div class="metric-box">
+            <div class="metric-label">Estimated Spend</div>
+            <div class="metric-value highlight" id="total-cost-val">₹0</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">Budget Balance</div>
+            <div class="metric-value" id="budget-ratio-val">In Budget</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Highlights Grid: Food & Transit -->
+      <div class="highlights-grid" id="highlights-grid">
+        <div class="highlight-card" id="food-highlight-card">
+          <div class="highlight-title">🍲 Must-Try Local Delicacies & Dining</div>
+          <ul class="highlight-list" id="food-highlight-list">
+            <!-- Populated dynamically -->
+          </ul>
+        </div>
+        <div class="highlight-card" id="transit-highlight-card">
+          <div class="highlight-title">🚆 Local Transit & Route Guidance</div>
+          <div class="highlight-text" id="transit-highlight-text">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Day-by-Day Timeline -->
+      <h3 class="section-heading">📅 Day-by-Day Exploration Schedule</h3>
+      <div class="days-timeline" id="days-timeline">
+        <!-- Days will be dynamically rendered here -->
+      </div>
+
+      <!-- Packing Checklist -->
+      <div class="packing-section">
+        <h3 class="section-heading">🎒 Smart Packing Suggestions</h3>
+        <div class="packing-grid" id="packing-grid">
+          <!-- Packing items rendered here -->
+        </div>
+      </div>
+
+      <!-- Export Toolbar -->
+      <div class="toolbar">
+        <button type="button" class="btn-secondary" id="btn-copy-json">
+          <span>📋 Copy JSON</span>
+        </button>
+        <button type="button" class="btn-secondary" id="btn-download-md">
+          <span>📥 Download Markdown</span>
+        </button>
+        <button type="button" class="btn-secondary" id="btn-print">
+          <span>🖨️ Print / Save PDF</span>
+        </button>
+      </div>
+
+    </section>
+
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
