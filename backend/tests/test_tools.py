@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from trip_planner.tools.search_tools import DuckDuckGoSearchTool
+from trip_planner.tools.search_tools import DuckDuckGoSearchTool, clear_search_cache
 
 
 def test_search_tool_formats_results():
@@ -43,3 +43,24 @@ def test_search_tool_handles_exception_gracefully():
         output = tool._run("any query")
 
     assert "Search failed" in output
+
+
+def test_search_tool_caching_avoids_repeated_calls():
+    clear_search_cache()
+    fake_results = [
+        {"title": "Jaipur Palaces", "body": "Hawa Mahal and City Palace.", "href": "https://example.com/jaipur"},
+    ]
+    with patch("trip_planner.tools.search_tools.DDGS") as mock_ddgs_cls:
+        mock_ddgs = MagicMock()
+        mock_ddgs.__enter__.return_value = mock_ddgs
+        mock_ddgs.text.return_value = fake_results
+        mock_ddgs_cls.return_value = mock_ddgs
+
+        tool = DuckDuckGoSearchTool()
+        first_call = tool._run("Jaipur palaces to visit")
+        second_call = tool._run("Jaipur palaces to visit")
+
+        assert first_call == second_call
+        assert "Jaipur Palaces" in first_call
+        assert mock_ddgs_cls.call_count == 1
+
