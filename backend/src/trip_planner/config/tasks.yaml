@@ -47,3 +47,20 @@ plan_itinerary_task:
   context:
     - select_city_task
     - gather_city_info_task
+
+revise_itinerary_task:
+  description: >-
+    You are given an EXISTING complete trip itinerary in JSON format:
+    {itinerary}
+
+    The traveler has provided the following conversational revision feedback:
+    "{feedback}"
+
+    Intelligently revise the itinerary based strictly on the user's feedback:
+    1. Apply ONLY the modifications directly requested or necessary based on the feedback.
+    2. Preserve all other existing days, themes, activities, attractions, and costs that were NOT affected by the feedback.
+    3. If any day's activities or costs change, re-estimate that day's cost (estimated_cost) and ensure total_estimated_cost is updated to exactly equal the sum of all day costs.
+    4. Keep the packing suggestions, destination, currency, and transit advice intact or adjust them if specifically affected by the feedback.
+  expected_output: >-
+    A complete revised TripItinerary model reflecting the user's requested changes while preserving the rest of the original itinerary.
+  agent: travel_concierge

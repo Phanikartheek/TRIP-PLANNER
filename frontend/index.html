@@ -334,6 +334,28 @@
         </div>
       </div>
 
+      <!-- Conversational Follow-Up Revision Section -->
+      <div class="revision-card" id="revision-section">
+        <div class="revision-header">
+          <h3 class="section-heading" style="margin-bottom: 0.35rem;">💬 Want changes? Tell me what to adjust</h3>
+          <p class="revision-hint">Provide specific tweaks (e.g., "Make Day 2 cheaper", "Replace trekking with relaxing cafe visits", "Add more heritage sites")</p>
+        </div>
+        <form id="revision-form" class="revision-form">
+          <div class="input-wrapper">
+            <input 
+              type="text" 
+              id="revision-input" 
+              class="form-input" 
+              placeholder="e.g., Day 2 has too much trekking, replace it with a relaxed sightseeing day instead..." 
+              required
+            >
+          </div>
+          <button type="submit" class="btn-submit" id="revision-btn" style="margin-top: 0.85rem;">
+            <span>✨ Revise Itinerary</span>
+          </button>
+        </form>
+      </div>
+
       <!-- Export Toolbar -->
       <div class="toolbar">
         <button type="button" class="btn-secondary" id="btn-copy-json">

@@ -18,6 +18,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from trip_planner.schemas.models import RevisionRequest
+
 load_dotenv()
 
 app = FastAPI(
@@ -89,6 +91,26 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
     return {"raw_output": str(result)}
 
 
+def _run_revision_sync(inputs: dict[str, Any]) -> dict[str, Any]:
+    """
+    Executes the specialized single-agent revision crew in a synchronous worker thread.
+    """
+    from trip_planner.crew import TripPlannerCrew
+
+    crew_instance = TripPlannerCrew().revision_crew()
+    result = crew_instance.kickoff(inputs=inputs)
+
+    if hasattr(result, "pydantic") and result.pydantic:
+        return result.pydantic.model_dump()
+    elif hasattr(result, "raw"):
+        import json
+        try:
+            return json.loads(result.raw)
+        except Exception:
+            return {"raw_output": result.raw}
+    return {"raw_output": str(result)}
+
+
 async def _execute_trip_job(job_id: str, inputs: dict[str, Any]) -> None:
     """
     Background worker task running the CrewAI pipeline and storing results.
@@ -96,6 +118,20 @@ async def _execute_trip_job(job_id: str, inputs: dict[str, Any]) -> None:
     JOB_STORE[job_id]["status"] = "running"
     try:
         itinerary_data = await asyncio.to_thread(_run_crew_sync, inputs)
+        JOB_STORE[job_id]["status"] = "complete"
+        JOB_STORE[job_id]["result"] = itinerary_data
+    except Exception as e:
+        JOB_STORE[job_id]["status"] = "failed"
+        JOB_STORE[job_id]["error"] = str(e)
+
+
+async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
+    """
+    Background worker task running the single-agent revision task and storing results.
+    """
+    JOB_STORE[job_id]["status"] = "running"
+    try:
+        itinerary_data = await asyncio.to_thread(_run_revision_sync, inputs)
         JOB_STORE[job_id]["status"] = "complete"
         JOB_STORE[job_id]["result"] = itinerary_data
     except Exception as e:
@@ -166,6 +202,58 @@ async def plan_trip_endpoint(request: TripPlanRequest):
 
     return JobStatusResponse(
         job_id=job_id,
+        status="pending",
+        created_at=created_at,
+    )
+
+
+@app.post("/api/revise-trip", response_model=JobStatusResponse)
+async def revise_trip_endpoint(request: RevisionRequest):
+    """
+    Accepts follow-up feedback on an existing completed itinerary,
+    spawns a targeted single-agent revision task, and returns a new job_id.
+    """
+    if request.job_id not in JOB_STORE:
+        raise HTTPException(status_code=404, detail="Original job not found")
+
+    orig_job = JOB_STORE[request.job_id]
+    if orig_job.get("status") != "complete" or not orig_job.get("result"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot revise a job that has not completed successfully",
+        )
+
+    if not os.getenv("GROQ_API_KEY"):
+        raise HTTPException(
+            status_code=500,
+            detail="GROQ_API_KEY is not configured in the environment or .env file.",
+        )
+
+    orig_itinerary = orig_job["result"]
+    import json
+    itinerary_str = json.dumps(orig_itinerary, indent=2) if isinstance(orig_itinerary, dict) else str(orig_itinerary)
+
+    revision_inputs = {
+        "itinerary": itinerary_str,
+        "feedback": request.feedback.strip(),
+    }
+
+    new_job_id = str(uuid.uuid4())
+    created_at = time.time()
+    JOB_STORE[new_job_id] = {
+        "job_id": new_job_id,
+        "status": "pending",
+        "result": None,
+        "error": None,
+        "created_at": created_at,
+        "inputs": revision_inputs,
+        "parent_job_id": request.job_id,
+    }
+
+    asyncio.create_task(_execute_revision_job(new_job_id, revision_inputs))
+
+    return JobStatusResponse(
+        job_id=new_job_id,
         status="pending",
         created_at=created_at,
     )

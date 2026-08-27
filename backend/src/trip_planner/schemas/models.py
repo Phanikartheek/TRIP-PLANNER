@@ -91,3 +91,15 @@ class TripItinerary(BaseModel):
             if computed_sum > 0:
                 self.total_estimated_cost = computed_sum
         return self
+
+
+class RevisionRequest(BaseModel):
+    """User request payload to revise an existing itinerary with conversational feedback."""
+
+    job_id: str = Field(
+        ..., description="ID of the completed trip planning job to revise"
+    )
+    feedback: str = Field(
+        ..., description="User follow-up feedback, e.g. 'make day 2 cheaper' or 'replace trekking with beach time'"
+    )
+

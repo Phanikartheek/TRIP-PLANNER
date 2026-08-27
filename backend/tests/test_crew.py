@@ -117,3 +117,45 @@ def test_trip_itinerary_reconciles_total_estimated_cost_with_days_sum():
     )
     # The validator automatically recomputed total to 8500.0 (5000 + 3500)
     assert itinerary.total_estimated_cost == 8500.0
+
+
+def test_revision_crew_uses_only_travel_concierge(crew_instance):
+    """Confirm the revision crew is single-agent and uses only travel_concierge."""
+    crew = crew_instance.revision_crew()
+    assert len(crew.agents) == 1
+    assert crew.agents[0].role == "Amazing Travel Concierge"
+    assert len(crew.tasks) == 1
+    assert crew.tasks[0].agent.role == "Amazing Travel Concierge"
+    assert crew.tasks[0].output_pydantic == TripItinerary
+
+
+def test_revision_request_schema_validation():
+    """Confirm RevisionRequest accepts valid payload and rejects missing fields."""
+    from trip_planner.schemas.models import RevisionRequest
+
+    req = RevisionRequest(job_id="test-job-uuid", feedback="Replace Day 2 trek with beach walk")
+    assert req.job_id == "test-job-uuid"
+    assert req.feedback == "Replace Day 2 trek with beach walk"
+
+    with pytest.raises(ValueError):
+        RevisionRequest(job_id="only-job-id")  # missing feedback
+
+
+def test_revise_trip_endpoint_rejects_invalid_or_incomplete_job():
+    """Confirm POST /api/revise-trip with non-existent or incomplete job_id returns 404/400."""
+    from fastapi.testclient import TestClient
+    from trip_planner.api.app import JOB_STORE, app
+
+    client = TestClient(app)
+
+    # 1. Non-existent job_id -> 404
+    res_404 = client.post("/api/revise-trip", json={"job_id": "non-existent-uuid", "feedback": "Make it cheaper"})
+    assert res_404.status_code == 404
+    assert "not found" in res_404.json()["detail"].lower()
+
+    # 2. Pending job_id -> 400
+    JOB_STORE["pending-job-uuid"] = {"job_id": "pending-job-uuid", "status": "pending", "result": None}
+    res_400 = client.post("/api/revise-trip", json={"job_id": "pending-job-uuid", "feedback": "Make it cheaper"})
+    assert res_400.status_code == 400
+    assert "not completed" in res_400.json()["detail"].lower()
+

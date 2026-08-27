@@ -27,6 +27,19 @@ load_dotenv()
 litellm.drop_params = True
 crewai.llms.cache.mark_cache_breakpoint = lambda m: m
 
+_original_litellm_completion = litellm.completion
+
+def _safe_litellm_completion(*args, **kwargs):
+    if "messages" in kwargs and isinstance(kwargs["messages"], list):
+        kwargs["messages"] = [
+            {k: v for k, v in m.items() if k not in ("cache_breakpoint", "cache_control")}
+            if isinstance(m, dict) else m
+            for m in kwargs["messages"]
+        ]
+    return _original_litellm_completion(*args, **kwargs)
+
+litellm.completion = _safe_litellm_completion
+
 # Automatically retry when hitting provider rate limits (e.g. Groq free tier TPM)
 _original_llm_call = LLM.call
 
@@ -39,11 +52,28 @@ def _parse_retry_after(err_msg: str) -> float | None:
     return None
 
 
+def _clean_messages(messages):
+    if not isinstance(messages, list):
+        return messages
+    cleaned = []
+    for msg in messages:
+        if isinstance(msg, dict):
+            c = {k: v for k, v in msg.items() if k not in ("cache_breakpoint", "cache_control")}
+            cleaned.append(c)
+        else:
+            cleaned.append(msg)
+    return cleaned
+
+
 def _resilient_llm_call(self, *args, **kwargs):
+    clean_args = [_clean_messages(a) for a in args]
+    if "messages" in kwargs:
+        kwargs["messages"] = _clean_messages(kwargs["messages"])
+
     max_retries = 8
     for attempt in range(max_retries):
         try:
-            return _original_llm_call(self, *args, **kwargs)
+            return _original_llm_call(self, *clean_args, **kwargs)
         except Exception as e:
             err_msg = str(e)
             if ("rate_limit" in err_msg.lower() or "429" in err_msg) and attempt < max_retries - 1:
@@ -55,7 +85,7 @@ def _resilient_llm_call(self, *args, **kwargs):
                 kwargs_copy = dict(kwargs)
                 kwargs_copy.pop("tools", None)
                 kwargs_copy.pop("tool_choice", None)
-                return _original_llm_call(self, *args, **kwargs_copy)
+                return _original_llm_call(self, *clean_args, **kwargs_copy)
             raise
 
 LLM.call = _resilient_llm_call
@@ -132,11 +162,36 @@ class TripPlannerCrew:
             output_pydantic=TripItinerary,
         )
 
+    @task
+    def revise_itinerary_task(self) -> Task:
+        return Task(
+            config=self.tasks_config["revise_itinerary_task"],
+            output_pydantic=TripItinerary,
+        )
+
     @crew
     def crew(self) -> Crew:
         return Crew(
-            agents=self.agents,  # populated by @agent-decorated methods, in definition order
-            tasks=self.tasks,  # populated by @task-decorated methods, in definition order
+            agents=[self.city_selector(), self.local_expert(), self.travel_concierge()],
+            tasks=[self.select_city_task(), self.gather_city_info_task(), self.plan_itinerary_task()],
+            process=Process.sequential,
+            verbose=True,
+        )
+
+    def revision_crew(self) -> Crew:
+        """
+        Specialized single-agent crew for conversational revisions.
+        Skips city selection and local research agents to revise existing itineraries quickly.
+        """
+        agent_instance = self.travel_concierge()
+        task_instance = Task(
+            config=self.tasks_config["revise_itinerary_task"],
+            agent=agent_instance,
+            output_pydantic=TripItinerary,
+        )
+        return Crew(
+            agents=[agent_instance],
+            tasks=[task_instance],
             process=Process.sequential,
             verbose=True,
         )

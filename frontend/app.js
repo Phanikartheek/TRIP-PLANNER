@@ -56,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentMode = 'domestic'; // 'domestic' | 'international'
   let currentCurrency = 'INR'; // 'INR' | 'USD' | 'EUR'
   let currentItinerary = null;
+  let currentJobId = null;
   let progressInterval = null;
 
   // Currency Symbols & Configurations
@@ -435,6 +436,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (jobStatus === 'complete') {
           itineraryData = statusData.result;
+          currentJobId = jobId;
           break;
         } else if (jobStatus === 'failed') {
           throw new Error(statusData.error || 'Trip planning job failed on server.');
@@ -457,6 +459,83 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
     }
   });
+
+  // --- Conversational Replanning Form Handler ---
+  const revisionForm = document.getElementById('revision-form');
+  const revisionInput = document.getElementById('revision-input');
+  const revisionBtn = document.getElementById('revision-btn');
+
+  if (revisionForm) {
+    revisionForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const feedback = revisionInput.value.trim();
+      if (!feedback) {
+        showToast('⚠️ Please enter your revision request.');
+        return;
+      }
+      if (!currentJobId) {
+        showToast('⚠️ No active itinerary found to revise.');
+        return;
+      }
+
+      revisionBtn.disabled = true;
+      revisionBtn.innerHTML = `
+        <div class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;"></div>
+        <span>Revising Itinerary with Travel Concierge...</span>
+      `;
+
+      try {
+        const response = await fetch('/api/revise-trip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ job_id: currentJobId, feedback }),
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.detail || `Revision request failed (${response.status})`);
+        }
+
+        const initData = await response.json();
+        const newJobId = initData.job_id;
+        let jobStatus = initData.status || 'pending';
+        let updatedItinerary = null;
+
+        while (jobStatus === 'pending' || jobStatus === 'running') {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const statusRes = await fetch(`/api/status/${newJobId}`);
+          if (!statusRes.ok) {
+            const errData = await statusRes.json().catch(() => ({}));
+            throw new Error(errData.detail || `Failed to check status (${statusRes.status})`);
+          }
+          const statusData = await statusRes.json();
+          jobStatus = statusData.status;
+
+          if (jobStatus === 'complete') {
+            updatedItinerary = statusData.result;
+            currentJobId = newJobId;
+            break;
+          } else if (jobStatus === 'failed') {
+            throw new Error(statusData.error || 'Revision job failed on server.');
+          }
+        }
+
+        currentItinerary = updatedItinerary;
+        const currentCurrency = currentItinerary.currency || 'INR';
+        const currentBudget = Number(budgetInput.value) || currentItinerary.total_estimated_cost;
+        renderItinerary(currentItinerary, currentBudget, currentCurrency);
+        revisionInput.value = '';
+        showToast('✨ Itinerary updated with your feedback!');
+
+      } catch (err) {
+        console.error('Revision error:', err);
+        showToast(`❌ Revision Error: ${err.message}`);
+      } finally {
+        revisionBtn.disabled = false;
+        revisionBtn.innerHTML = `<span>✨ Revise Itinerary</span>`;
+      }
+    });
+  }
 
   // --- Agent Progression Animation ---
   function startAgentProgressAnimation() {
