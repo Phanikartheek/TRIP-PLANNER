@@ -9,6 +9,7 @@ later without touching crew.py at all.
 """
 
 import sys
+
 from trip_planner.crew import TripPlannerCrew
 
 
