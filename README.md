@@ -1,34 +1,42 @@
-# 🇮🇳 AI Trip Planner — India Edition (v1)
+# 🇮🇳 AI Trip Planner — Multi-Agent Travel Engine
 
-A multi-agent trip-planning pipeline built with [CrewAI](https://docs.crewai.com) and [Groq](https://groq.com), customized specifically for domestic Indian travel.
+A multi-agent trip-planning application built with [CrewAI](https://docs.crewai.com), [FastAPI](https://fastapi.tiangolo.com), and [Groq](https://groq.com), featuring rich domestic Indian travel intelligence and global exploration.
 
-Three autonomous AI agents collaborate sequentially — evaluating candidate Indian destinations, researching local sights, cuisine, and transit, and generating a validated, structured `TripItinerary` with day-by-day morning/afternoon/evening schedules, budget tracking in INR (₹), and packing checklists.
+Three autonomous AI agents collaborate sequentially — evaluating candidate destinations, researching local attractions, cuisine, and transit routes, and generating a validated, structured `TripItinerary` complete with day-by-day morning/afternoon/evening schedules, budget breakdown, and packing checklists.
 
 ---
 
-## 🌟 Key Features (Phase 1 — Built & Verified)
+## ⚡ Quickstart (1-Click Run)
 
-- **🇮🇳 India-Focused Travel Intelligence**: Tailored for domestic Indian itineraries (e.g. hill stations, beach getaways, royal heritage routes, and spiritual hubs).
+Start both Frontend and Backend together with automatic browser opening:
+
+- **Windows (Double-click)**: Run **`run.bat`**
+- **Terminal (Cross-Platform)**:
+  ```bash
+  python run.py
+  ```
+- **PowerShell**:
+  ```powershell
+  .\run.ps1
+  ```
+
+Your browser will automatically open to **[http://127.0.0.1:8000](http://127.0.0.1:8000)** with the backend and frontend connected.
+
+---
+
+## 🌟 Key Features
+
+- **🇮🇳 India-Focused & Global Travel Intelligence**: Tailored for domestic Indian getaways (hill stations, coastal routes, heritage circuits, spiritual hubs) and international travel.
 - **🤖 3-Stage Sequential CrewAI Pipeline**:
   - `City Selection Expert`: Compares candidate cities against origin, duration, interests, seasonal weather, and budget to select the best destination.
   - `Local Tour Guide`: Curates attractions, regional cuisine/food recommendations, safety notes, and on-the-ground transit tips.
   - `Amazing Travel Concierge`: Assembles a structured day-by-day schedule with per-day cost estimates, total budget tracking, and packing suggestions.
-- **📄 Pydantic Schema Validation & Cost Reconciliation**: Every pipeline task is validated against rigid Pydantic models (`src/trip_planner/schemas/models.py`) with currency-agnostic fields (`total_estimated_cost`, `estimated_cost`) and an automatic post-validator reconciling total cost with daily sums.
-- **⚡ Fast Inference via Groq**: Uses Groq LLMs via CrewAI's `LLM` class (LiteLLM-backed) for low-latency planning with zero paid LLM subscription requirement.
+- **💬 Conversational Replanning & Live Destination Q&A**: Refine itineraries dynamically with follow-up instructions (e.g. "make day 3 more relaxing", "add vegetarian street food") or ask instant questions about local transit and entry fees.
+- **📄 Pydantic Schema Validation & Cost Reconciliation**: Every pipeline task is validated against rigid Pydantic models (`backend/src/trip_planner/schemas/models.py`) ensuring mathematical budget integrity.
+- **⚡ Ultra-Fast Inference via Groq**: Uses Groq LLMs (`groq/qwen/qwen3.8-27b` / `groq/openai/gpt-oss-120b`) via LiteLLM for high-throughput, low-latency reasoning with zero required paid subscriptions.
 - **🔍 Zero-Cost Search & Scraping Tools**: DuckDuckGo search integration and static HTML website scraping tools.
-- **🌐 Interactive Web Dashboard & REST API**: Full FastAPI server with a dark glassmorphic responsive UI, destination presets, dietary filter pills, and live agent execution progress tracking.
-- **🛡️ Phase 1 Allowlist Gate**: Backend validation on `/api/plan-trip` enforcing domestic Indian travel mode and rejecting unready international requests with clear Phase 2 messaging.
-- **💻 CLI Entrypoint**: Interactive terminal interface prompting for origin, candidate cities, interests, trip duration, and budget.
-- **🛡️ Built-in Rate Limit Resilience**: Automatic exponential retry backoff wrapper around Groq API calls.
-
----
-
-## 📐 Design Decisions
-
-- **Groq via LiteLLM**: Chosen for ultra-low inference latency and generous free-tier token allowances, eliminating paid OpenAI subscription barriers while providing high-quality 120B parameter reasoning for complex multi-step planning.
-- **Config-Driven YAML Architecture**: Agent roles, backstories, and task prompts are isolated in `config/agents.yaml` and `config/tasks.yaml`. This cleanly decouples prompt tuning from Python orchestration logic, making agent behaviors easily auditable and maintainable.
-- **Pydantic Schema Validation & Arithmetic Reconciliation**: Rather than trusting LLMs with arithmetic summation, Pydantic data contracts enforce structured JSON deliverables and derive `total_estimated_cost` as the exact sum of daily line-item expenses.
-- **Strict Phase 1 Domestic Scope & API-Level Allowlist Gate**: Focused domain specialization delivers deep regional expertise (monsoon seasonality, train/flight routing, local cuisine) before international scaling. A strict API allowlist prevents bypass regardless of client-side state.
+- **🌐 Glassmorphic UI Dashboard**: Responsive dark mode interface with destination presets, dietary preference pills, interactive budget slider, and live agent execution progress tracking.
+- **📋 Export Options**: One-click Copy JSON, Download Markdown, and Print / PDF export.
 
 ---
 
@@ -49,6 +57,9 @@ Three autonomous AI agents collaborate sequentially — evaluating candidate Ind
 
 ```
 trip_planner/
+├── run.bat                          # 🚀 1-Click Windows Batch Launcher
+├── run.ps1                          # 🚀 1-Click PowerShell Launcher
+├── run.py                           # 🚀 1-Click Cross-Platform Launcher
 ├── frontend/                        # 🎨 Web Dashboard UI Assets
 │   ├── index.html                   # Glassmorphic user interface
 │   ├── style.css                    # Design tokens & responsive styles
@@ -61,13 +72,13 @@ trip_planner/
 │   │       ├── main.py              # CLI entrypoint
 │   │       ├── api/
 │   │       │   ├── __init__.py
-│   │       │   └── app.py           # FastAPI server and REST endpoints (/api/plan-trip, /api/health)
+│   │       │   └── app.py           # FastAPI server & REST API (/api/plan-trip, /api/health, /api/revise-trip)
 │   │       ├── config/
 │   │       │   ├── agents.yaml      # Agent roles, goals, and backstories
 │   │       │   └── tasks.yaml       # Task descriptions, contexts, and expected outputs
 │   │       ├── schemas/
 │   │       │   ├── __init__.py
-│   │       │   └── models.py        # Pydantic data contracts (TripItinerary, CityGuide, CitySelection)
+│   │       │   └── models.py        # Pydantic contracts (TripItinerary, CityGuide, CitySelection)
 │   │       └── tools/
 │   │           ├── __init__.py
 │   │           ├── search_tools.py  # DuckDuckGo search BaseTool wrapper
@@ -79,13 +90,13 @@ trip_planner/
 │   └── workflows/
 │       └── ci.yml                   # GitHub Actions CI workflow
 ├── .env.example                     # Environment configuration template
-├── pyproject.toml                   # Project dependencies, packaging, and tool configuration
+├── pyproject.toml                   # Project dependencies and tool configuration
 └── README.md                        # Documentation
 ```
 
 ---
 
-## 🚀 Setup & Installation
+## 🚀 Setup & Manual Installation
 
 ### 1. Prerequisites
 - Python 3.10+
@@ -106,18 +117,9 @@ source .venv/bin/activate    # macOS / Linux
 pip install -e ".[dev]"
 ```
 
-Dependencies installed via `pyproject.toml`:
-- `crewai[litellm]>=0.86.0`
-- `crewai-tools>=0.17.0`
-- `ddgs>=9.0.0`
-- `pydantic>=2.7.0`
-- `python-dotenv>=1.0.1`
-- `fastapi>=0.110.0`
-- `uvicorn>=0.29.0`
-
 ### 3. Environment Configuration
 
-Copy `.env.example` to `.env` and configure your API key:
+Copy `.env.example` to `.env` and set your API key:
 
 ```bash
 cp .env.example .env
@@ -126,38 +128,34 @@ cp .env.example .env
 Inside `.env`:
 ```env
 GROQ_API_KEY=gsk_your_groq_api_key_here
-TRIP_PLANNER_MODEL=groq/openai/gpt-oss-120b
+TRIP_PLANNER_MODEL=groq/qwen/qwen3.8-27b
 ```
 
 ---
 
 ## 💻 Running the Application
 
-### Option A: Interactive Web Dashboard (Recommended)
-
+### Option A: 1-Click Launcher (Recommended)
 ```bash
-$env:PYTHONPATH='backend/src'
-python -m trip_planner.api.app
+python run.py
+# or double-click run.bat on Windows
 ```
 Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in your browser.
 
 ---
 
-### Option B: Terminal CLI Mode
-
+### Option B: FastAPI Backend via Uvicorn
 ```bash
-trip-planner
-# or: $env:PYTHONPATH='backend/src'; python -m trip_planner.main
+python -m uvicorn trip_planner.api.app:app --app-dir backend/src --host 127.0.0.1 --port 8000 --reload
 ```
 
-You will be prompted for:
-1. **Departing from** (e.g. `Bengaluru`, `Delhi NCR`, `Mumbai`)
-2. **Candidate cities** (e.g. `Manali, Munnar, Goa`)
-3. **Interests** (e.g. `nature, waterfalls, street food, temples`)
-4. **Trip length in days** (e.g. `5`)
-5. **Total budget** (e.g. `25000` INR)
+---
 
-The terminal will stream agent execution and print a validated, structured `TripItinerary` JSON.
+### Option C: Terminal CLI Mode
+```bash
+$env:PYTHONPATH="backend/src"
+python -m trip_planner.main
+```
 
 ---
 
@@ -166,20 +164,8 @@ The terminal will stream agent execution and print a validated, structured `Trip
 Run the automated test suite to verify agent configurations, task wiring, and schema validation:
 
 ```bash
-$env:PYTHONPATH='backend/src'
+$env:PYTHONPATH="backend/src"
 pytest backend/tests/ -v
 ```
 
-All 11 unit tests run deterministically against mock search inputs and Pydantic validation contracts without invoking external LLM APIs.
-
----
-
-## 🗺️ Roadmap (Phase 2 — Planned, Not Yet Built)
-
-The following features are planned for future releases:
-
-- [ ] **🌍 Global Destination Mode**: Expanding scope to support international travel destinations outside India (the Global toggle in the web UI is currently locked in a disabled preview state, and the backend actively validates domestic-only requests for Phase 1).
-- [ ] **💱 Dynamic Multi-Currency Engine**: Adding full multi-currency selection (`USD`, `EUR`, `GBP`) with real-time conversion rates.
-- [ ] **📄 PDF & Calendar Export**: Exporting generated itineraries directly to styled PDF documents and `.ics` calendar files.
-- [ ] **🚆 Live Transport APIs**: Integrating real-time IRCTC train availability and domestic flight pricing APIs.
-- [ ] **⚡ Caching & Performance**: Adding a query cache layer to avoid repeated DuckDuckGo searches for identical queries.
+All unit tests run deterministically against mock search inputs and Pydantic validation contracts without invoking external LLM APIs.
