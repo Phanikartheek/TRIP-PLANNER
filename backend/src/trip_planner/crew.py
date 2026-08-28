@@ -21,7 +21,7 @@ from crewai import LLM, Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task
 from dotenv import load_dotenv
 
-from trip_planner.schemas.models import CityGuide, CitySelection, TripItinerary
+from trip_planner.schemas.models import CityGuide, CitySelection, QAResponse, TripItinerary
 from trip_planner.tools import DuckDuckGoSearchTool, build_scrape_tool
 
 load_dotenv()
@@ -197,6 +197,7 @@ class TripPlannerCrew:
         return Task(
             config=self.tasks_config["answer_destination_question_task"],
             agent=self.local_qa_expert(),
+            output_pydantic=QAResponse,
         )
 
     @crew
@@ -229,12 +230,13 @@ class TripPlannerCrew:
     def qa_crew(self) -> Crew:
         """
         Specialized single-agent crew for answering direct destination questions.
-        Outputs a direct text answer with real named establishments.
+        Outputs a structured QAResponse model with grounded/ungrounded claims.
         """
         agent_instance = self.local_qa_expert()
         task_instance = Task(
             config=self.tasks_config["answer_destination_question_task"],
             agent=agent_instance,
+            output_pydantic=QAResponse,
         )
         return Crew(
             agents=[agent_instance],

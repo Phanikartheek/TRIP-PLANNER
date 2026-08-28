@@ -72,12 +72,21 @@ answer_destination_question_task:
     The traveler is visiting {destination_city} and has asked the following specific question:
     "{question}"
 
+    Prior Conversation History in this session:
+    {conversation_history}
+
     Instructions:
-    1. If the question has multiple parts or topics (e.g. asking about food/biryani AND shopping malls/cinemas), decompose the question and search for EACH part separately using web search before answering.
-    2. Do NOT repeat searches for the same sub-topic. Once you find 1-2 reliable places for the first part, immediately search for the remaining parts of the question.
-    3. Ground all recommendations strictly in real, named establishments located in {destination_city} (e.g. specific restaurant names, shopping malls with cinemas).
-    4. Do not answer any part using ungrounded memory or guess places from other cities — if you cannot find search results for a part, state that clearly and honestly rather than guessing.
-    5. Provide a direct, helpful, and concise answer (3-6 sentences).
+    1. Multi-Turn Context: Use the prior conversation history naturally to resolve references or follow-up queries (e.g. if the user previously asked about biryani and now asks "what about something cheaper" or "what about vegetarian options near there", recognize what they are referring to).
+    2. Decompose Compound Questions: If the question has multiple parts or topics (e.g. asking about food/biryani AND shopping malls/cinemas), decompose the question and search for EACH part separately using web search before answering.
+    3. No Redundant Searches: Once you find 1-2 reliable places for a sub-topic, immediately search for the remaining parts of the question.
+    4. Strict Local Grounding: Ground all recommendations strictly in real, named establishments located in {destination_city}.
+    5. Self-Report Grounding: After formulating the answer, explicitly categorize your statements:
+       - grounded_claims: List specific named places, establishments, or facts directly verified by tool search results.
+       - ungrounded_claims: List any general advice, assertions, or statements not backed by a specific search result. If everything in the answer is verified by search results, return an empty list ([]).
+    6. Provide a direct, helpful, and concise answer (3-6 sentences).
   expected_output: >-
-    A concise, direct 3-6 sentence answer naming specific, real-world places located in {destination_city} that directly address each part of the traveler's question.
+    A structured QAResponse JSON containing:
+    - answer: direct 3-6 sentence response naming specific real-world places in {destination_city}.
+    - grounded_claims: list of specific named places/facts directly verified by tool search results.
+    - ungrounded_claims: list of statements based on general knowledge without search result backing (empty list if all grounded).
   agent: local_qa_expert

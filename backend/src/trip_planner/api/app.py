@@ -4,7 +4,9 @@ and serving the frontend web dashboard.
 """
 
 import asyncio
+import json
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -18,7 +20,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from trip_planner.schemas.models import DestinationQuestion, RevisionRequest
+from trip_planner.schemas.models import DestinationQuestion, QAResponse, RevisionRequest
 
 load_dotenv()
 
@@ -161,24 +163,85 @@ def _run_qa_sync(inputs: dict[str, Any]) -> dict[str, Any]:
     crew_instance = TripPlannerCrew().qa_crew()
     result = crew_instance.kickoff(inputs=inputs)
 
-    raw_text = result.raw if hasattr(result, "raw") else str(result)
-    import re
-    urls = re.findall(r"https?://[^\s\)\],\"']+", raw_text)
-    unique_urls = list(dict.fromkeys(urls)) if urls else None
+    grounded_claims: list[str] = []
+    ungrounded_claims: list[str] = []
+    answer_text = ""
+    sources: list[str] | None = None
+
+    if hasattr(result, "pydantic") and result.pydantic:
+        pydantic_res = result.pydantic
+        if isinstance(pydantic_res, QAResponse):
+            answer_text = pydantic_res.answer
+            grounded_claims = pydantic_res.grounded_claims or []
+            ungrounded_claims = pydantic_res.ungrounded_claims or []
+            sources = pydantic_res.sources
+        elif isinstance(pydantic_res, dict):
+            answer_text = pydantic_res.get("answer", "")
+            grounded_claims = pydantic_res.get("grounded_claims", [])
+            ungrounded_claims = pydantic_res.get("ungrounded_claims", [])
+            sources = pydantic_res.get("sources")
+    elif hasattr(result, "json_dict") and result.json_dict:
+        answer_text = result.json_dict.get("answer", "")
+        grounded_claims = result.json_dict.get("grounded_claims", [])
+        ungrounded_claims = result.json_dict.get("ungrounded_claims", [])
+        sources = result.json_dict.get("sources")
+    else:
+        raw_text = result.raw if hasattr(result, "raw") else str(result)
+        try:
+            cleaned = raw_text.strip()
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r"^```(?:json)?\n", "", cleaned)
+                cleaned = re.sub(r"\n```$", "", cleaned)
+            data = json.loads(cleaned)
+            if isinstance(data, dict):
+                answer_text = data.get("answer", raw_text)
+                grounded_claims = data.get("grounded_claims", [])
+                ungrounded_claims = data.get("ungrounded_claims", [])
+                sources = data.get("sources")
+            else:
+                answer_text = raw_text.strip()
+        except Exception:
+            answer_text = raw_text.strip()
+
+    if not sources:
+        raw_text = result.raw if hasattr(result, "raw") else str(result)
+        urls = re.findall(r"https?://[^\s\)\],\"']+", raw_text)
+        sources = list(dict.fromkeys(urls)) if urls else None
 
     return {
-        "answer": raw_text.strip(),
-        "sources": unique_urls,
+        "answer": answer_text,
+        "grounded_claims": grounded_claims,
+        "ungrounded_claims": ungrounded_claims,
+        "sources": sources,
     }
 
 
-async def _execute_qa_job(job_id: str, inputs: dict[str, Any]) -> None:
+async def _execute_qa_job(
+    job_id: str,
+    inputs: dict[str, Any],
+    root_job_id: str,
+    question: str,
+) -> None:
     """
     Background worker task running the destination Q&A crew and storing results.
     """
     JOB_STORE[job_id]["status"] = "running"
     try:
         qa_data = await asyncio.to_thread(_run_qa_sync, inputs)
+        qa_exchange = {
+            "question": question,
+            "answer": qa_data.get("answer", ""),
+            "timestamp": time.time(),
+            "grounded_claims": qa_data.get("grounded_claims", []),
+            "ungrounded_claims": qa_data.get("ungrounded_claims", []),
+        }
+
+        if root_job_id in JOB_STORE:
+            JOB_STORE[root_job_id].setdefault("qa_history", []).append(qa_exchange)
+            qa_data["qa_history"] = list(JOB_STORE[root_job_id]["qa_history"])
+        else:
+            qa_data["qa_history"] = [qa_exchange]
+
         JOB_STORE[job_id]["status"] = "complete"
         JOB_STORE[job_id]["result"] = qa_data
     except Exception as e:
@@ -337,9 +400,28 @@ async def ask_question_endpoint(request: DestinationQuestion):
             or orig_job.get("inputs", {}).get("cities", "the destination")
         )
 
+    # Trace back to root planning job to access session QA history
+    root_job_id = request.job_id
+    curr = JOB_STORE[root_job_id]
+    while curr.get("parent_job_id") and curr.get("parent_job_id") in JOB_STORE:
+        root_job_id = curr["parent_job_id"]
+        curr = JOB_STORE[root_job_id]
+
+    history_items = JOB_STORE[root_job_id].get("qa_history", [])
+    if history_items:
+        history_lines = []
+        for idx, ex in enumerate(history_items, 1):
+            q = ex.get("question") if isinstance(ex, dict) else getattr(ex, "question", "")
+            a = ex.get("answer") if isinstance(ex, dict) else getattr(ex, "answer", "")
+            history_lines.append(f"Turn {idx}:\nUser Question: {q}\nExpert Answer: {a}")
+        conversation_history_str = "\n\n".join(history_lines)
+    else:
+        conversation_history_str = "No prior conversation history for this session."
+
     qa_inputs = {
         "destination_city": str(destination_city),
         "question": request.question.strip(),
+        "conversation_history": conversation_history_str,
     }
 
     new_job_id = str(uuid.uuid4())
@@ -355,7 +437,7 @@ async def ask_question_endpoint(request: DestinationQuestion):
         "type": "destination_qa",
     }
 
-    asyncio.create_task(_execute_qa_job(new_job_id, qa_inputs))
+    asyncio.create_task(_execute_qa_job(new_job_id, qa_inputs, root_job_id, request.question.strip()))
 
     return JobStatusResponse(
         job_id=new_job_id,

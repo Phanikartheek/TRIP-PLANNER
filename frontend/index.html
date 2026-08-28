@@ -366,7 +366,7 @@
       <div class="qa-card" id="qa-section">
         <div class="qa-header">
           <h3 class="section-heading" style="margin-bottom: 0.35rem;">❓ Ask about your destination</h3>
-          <p class="qa-hint">Ask specific questions about food, shopping, cafes, or attractions (e.g. "Where is good biryani here?", "Which mall has a cinema?")</p>
+          <p class="qa-hint">Ask specific follow-up questions about food, shopping, cafes, or attractions (e.g. "Where is good biryani here?", "Is there anything cheaper?"). Your conversation history is preserved across turns.</p>
         </div>
         <form id="qa-form" class="qa-form">
           <div class="input-wrapper">
@@ -374,7 +374,7 @@
               type="text" 
               id="qa-input" 
               class="form-input" 
-              placeholder="e.g., Where can I find good biryani in Vijayawada, and is there a good shopping mall with a cinema?" 
+              placeholder="e.g., Where can I find good biryani here? (or follow up on prior answers)" 
               required
             >
           </div>
@@ -382,17 +382,10 @@
             <span>🔍 Ask Question</span>
           </button>
         </form>
-        <!-- Distinct Q&A Answer Display Area -->
-        <div class="qa-answer-box hidden" id="qa-answer-box">
-          <div class="qa-answer-header">
-            <span class="qa-badge">📍 Local Q&A Expert Answer</span>
-          </div>
-          <div class="qa-answer-text" id="qa-answer-text">
-            <!-- Populated dynamically -->
-          </div>
-          <div class="qa-sources-list hidden" id="qa-sources-list">
-            <!-- Sources links rendered dynamically -->
-          </div>
+        
+        <!-- Multi-Turn Stacking Conversation Thread Area -->
+        <div class="qa-conversation-thread hidden" id="qa-conversation-thread">
+          <!-- Dynamically populated with qa-turn-card elements -->
         </div>
       </div>
 

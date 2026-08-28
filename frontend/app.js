@@ -588,9 +588,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const qaForm = document.getElementById('qa-form');
   const qaInput = document.getElementById('qa-input');
   const qaBtn = document.getElementById('qa-btn');
-  const qaAnswerBox = document.getElementById('qa-answer-box');
-  const qaAnswerText = document.getElementById('qa-answer-text');
-  const qaSourcesList = document.getElementById('qa-sources-list');
+  const qaConversationThread = document.getElementById('qa-conversation-thread');
+  let qaTurnCount = 0;
 
   if (qaForm) {
     qaForm.addEventListener('submit', async (e) => {
@@ -647,19 +646,59 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (qaResult) {
+          qaTurnCount += 1;
           const answerText = qaResult.answer || (typeof qaResult === 'string' ? qaResult : JSON.stringify(qaResult));
-          qaAnswerText.textContent = answerText;
+          const groundedClaims = Array.isArray(qaResult.grounded_claims) ? qaResult.grounded_claims : [];
+          const ungroundedClaims = Array.isArray(qaResult.ungrounded_claims) ? qaResult.ungrounded_claims : [];
+          const sources = Array.isArray(qaResult.sources) ? qaResult.sources : [];
 
-          if (qaResult.sources && Array.isArray(qaResult.sources) && qaResult.sources.length > 0) {
-            qaSourcesList.innerHTML = `<strong>Sources:</strong> ` + qaResult.sources.map(url => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`).join(', ');
-            qaSourcesList.classList.remove('hidden');
-          } else {
-            qaSourcesList.innerHTML = '';
-            qaSourcesList.classList.add('hidden');
+          // Render Grounding Badges
+          let groundingHtml = '';
+          if (groundedClaims.length > 0 || ungroundedClaims.length > 0) {
+            groundingHtml = `
+              <div class="qa-grounding-section">
+                <div class="qa-grounding-label">Fact Verification & Grounding</div>
+                <div class="qa-claims-badges-wrapper">
+                  ${groundedClaims.map(c => `<span class="qa-claim-badge-grounded" title="Search-verified fact">✓ ${escapeHtml(c)}</span>`).join('')}
+                  ${ungroundedClaims.map(c => `<span class="qa-claim-badge-ungrounded" title="General knowledge, not search-verified">⚠ ${escapeHtml(c)}</span>`).join('')}
+                </div>
+              </div>
+            `;
           }
 
-          qaAnswerBox.classList.remove('hidden');
-          showToast('✅ Question answered by Local Expert!');
+          // Render Sources
+          let sourcesHtml = '';
+          if (sources.length > 0) {
+            sourcesHtml = `
+              <div class="qa-sources-list">
+                <strong>Sources:</strong> ${sources.map(url => `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`).join(', ')}
+              </div>
+            `;
+          }
+
+          const turnCard = document.createElement('div');
+          turnCard.className = 'qa-turn-card';
+          turnCard.innerHTML = `
+            <div class="qa-turn-header">
+              <span class="qa-turn-badge">📍 Turn #${qaTurnCount} • Local Q&A Expert</span>
+              <span class="qa-turn-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            </div>
+            <div class="qa-user-query">
+              <span class="qa-user-query-icon">💬</span>
+              <span>${escapeHtml(question)}</span>
+            </div>
+            <div class="qa-agent-response">${escapeHtml(answerText)}</div>
+            ${groundingHtml}
+            ${sourcesHtml}
+          `;
+
+          if (qaConversationThread) {
+            qaConversationThread.appendChild(turnCard);
+            qaConversationThread.classList.remove('hidden');
+          }
+
+          qaInput.value = '';
+          showToast(`✅ Turn #${qaTurnCount} answered!`);
         }
 
       } catch (err) {

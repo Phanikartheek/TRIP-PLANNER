@@ -9,6 +9,8 @@ passed along, so failures surface immediately (a validation error) instead
 of silently propagating a malformed string three stages later.
 """
 
+import time
+
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -103,6 +105,42 @@ class RevisionRequest(BaseModel):
         ..., description="User follow-up feedback, e.g. 'make day 2 cheaper' or 'replace trekking with beach time'"
     )
 
+class QAExchange(BaseModel):
+    """Represents a single conversational turn in the destination Q&A thread."""
+
+    question: str = Field(..., description="The user's question")
+    answer: str = Field(..., description="The expert's response")
+    timestamp: float = Field(default_factory=time.time, description="Unix timestamp of the exchange")
+    grounded_claims: list[str] = Field(
+        default_factory=list,
+        description="Specific named places, facts, or prices verified via search/tools",
+    )
+    ungrounded_claims: list[str] = Field(
+        default_factory=list,
+        description="Claims stated from general knowledge without matching search results",
+    )
+
+
+class QAResponse(BaseModel):
+    """Structured output contract for the Local Q&A Expert."""
+
+    answer: str = Field(
+        ...,
+        description="Direct, helpful 3-6 sentence response with specific named establishments",
+    )
+    grounded_claims: list[str] = Field(
+        default_factory=list,
+        description="List of specific named places, prices, or facts directly verified from tool search results",
+    )
+    ungrounded_claims: list[str] = Field(
+        default_factory=list,
+        description="List of statements or advice based on general knowledge without tool verification (empty list if all grounded)",
+    )
+    sources: list[str] | None = Field(
+        default=None,
+        description="Optional reference URLs from search results",
+    )
+
 
 class DestinationQuestion(BaseModel):
     """User request payload to ask a direct question about a destination."""
@@ -113,13 +151,12 @@ class DestinationQuestion(BaseModel):
     question: str = Field(
         ..., description="User question about the destination (e.g. food, shopping, cafes, transport)"
     )
-
-
-class QuestionAnswer(BaseModel):
-    """Response payload containing direct answer to a destination question."""
-
-    answer: str = Field(..., description="Direct answer to the user's question")
-    sources: list[str] | None = Field(
-        default=None, description="Optional reference URLs from search results"
+    conversation_history: list[QAExchange] | None = Field(
+        default=None,
+        description="Optional prior conversational exchanges in the same session",
     )
+
+
+# Alias QuestionAnswer to QAResponse for backward compatibility
+QuestionAnswer = QAResponse
 

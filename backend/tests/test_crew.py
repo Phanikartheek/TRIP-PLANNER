@@ -181,6 +181,86 @@ def test_destination_question_schema_validation():
         DestinationQuestion(job_id="only-job-id")  # missing question
 
 
+def test_qa_response_schema_validation_with_grounding_claims():
+    """Confirm QAResponse schema correctly accepts grounded_claims and ungrounded_claims as separate lists."""
+    from trip_planner.schemas.models import QAExchange, QAResponse
+
+    # 1. Valid fully-grounded response
+    qa_resp = QAResponse(
+        answer="Try Naidu Gari Kunda Biryani on MG Road.",
+        grounded_claims=["Naidu Gari Kunda Biryani on MG Road"],
+        ungrounded_claims=[],
+        sources=["https://example.com/biryani"],
+    )
+    assert qa_resp.answer == "Try Naidu Gari Kunda Biryani on MG Road."
+    assert qa_resp.grounded_claims == ["Naidu Gari Kunda Biryani on MG Road"]
+    assert qa_resp.ungrounded_claims == []
+    assert qa_resp.sources == ["https://example.com/biryani"]
+
+    # 2. Mixed response with ungrounded claims
+    qa_mixed = QAResponse(
+        answer="PVP Square has cinemas. Typically malls are less crowded on weekday mornings.",
+        grounded_claims=["PVP Square has cinemas"],
+        ungrounded_claims=["malls are less crowded on weekday mornings"],
+    )
+    assert len(qa_mixed.grounded_claims) == 1
+    assert len(qa_mixed.ungrounded_claims) == 1
+
+    # 3. QAExchange model test
+    exchange = QAExchange(
+        question="Where is good biryani?",
+        answer="Naidu Gari Kunda Biryani",
+        grounded_claims=["Naidu Gari Kunda Biryani"],
+        ungrounded_claims=[],
+    )
+    assert exchange.question == "Where is good biryani?"
+    assert exchange.answer == "Naidu Gari Kunda Biryani"
+    assert exchange.timestamp > 0
+
+
+def test_ask_question_multi_turn_history_passed_to_context():
+    """Confirm conversation history from Turn 1 is passed into Turn 2's context."""
+    from fastapi.testclient import TestClient
+    from trip_planner.api.app import JOB_STORE, app
+
+    client = TestClient(app)
+    root_job_id = "test-session-root-job"
+
+    # Setup initial completed trip job
+    JOB_STORE[root_job_id] = {
+        "job_id": root_job_id,
+        "status": "complete",
+        "result": {"destination_city": "Vijayawada", "city": "Vijayawada"},
+        "qa_history": [
+            {
+                "question": "Where can I find good biryani here?",
+                "answer": "Naidu Gari Kunda Biryani and Sai Silver Dum Biryani are top choices.",
+                "grounded_claims": ["Naidu Gari Kunda Biryani", "Sai Silver Dum Biryani"],
+                "ungrounded_claims": [],
+                "timestamp": 1700000000.0,
+            }
+        ],
+    }
+
+    # Submit second turn question
+    res = client.post(
+        "/api/ask-question",
+        json={"job_id": root_job_id, "question": "Is there anything cheaper than that nearby?"},
+    )
+    assert res.status_code == 200
+    new_qa_job_id = res.json()["job_id"]
+
+    # Inspect created job's inputs to verify history inclusion
+    created_job = JOB_STORE[new_qa_job_id]
+    history_in_context = created_job["inputs"]["conversation_history"]
+
+    assert "Turn 1:" in history_in_context
+    assert "Where can I find good biryani here?" in history_in_context
+    assert "Naidu Gari Kunda Biryani" in history_in_context
+    assert created_job["inputs"]["question"] == "Is there anything cheaper than that nearby?"
+    assert created_job["inputs"]["destination_city"] == "Vijayawada"
+
+
 def test_ask_question_endpoint_rejects_invalid_or_incomplete_job():
     """Confirm POST /api/ask-question with non-existent or incomplete job_id returns 404/400."""
     from fastapi.testclient import TestClient
