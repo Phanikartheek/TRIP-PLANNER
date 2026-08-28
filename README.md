@@ -1,6 +1,11 @@
 # 🇮🇳 AI Trip Planner — India Edition (v1)
 
-A multi-agent trip-planning application built with [CrewAI](https://docs.crewai.com), [FastAPI](https://fastapi.tiangolo.com), and [Groq](https://groq.com), customized specifically for domestic Indian travel.
+[![CI](https://github.com/Phanikartheek/TRIP-PLANNER/actions/workflows/ci.yml/badge.svg)](https://github.com/Phanikartheek/TRIP-PLANNER/actions/workflows/ci.yml)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![CrewAI](https://img.shields.io/badge/CrewAI-Multi--Agent-FF4F00.svg)](https://crewai.com)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python&logoColor=white)](https://python.org)
+
+A production-ready multi-agent trip-planning application built with [CrewAI](https://docs.crewai.com), [FastAPI](https://fastapi.tiangolo.com), and [Groq](https://groq.com), customized specifically for domestic Indian travel.
 
 Three autonomous AI agents collaborate sequentially — evaluating candidate destinations across India, researching local attractions, cuisine, and transit routes, and generating a validated, structured `TripItinerary` complete with day-by-day morning/afternoon/evening schedules, budget breakdown in INR (₹), and packing checklists.
 
@@ -32,7 +37,7 @@ Your default browser will automatically open **[http://127.0.0.1:8000](http://12
   - `Local Tour Guide`: Curates attractions, regional cuisine/food recommendations, safety notes, and on-the-ground transit tips.
   - `Amazing Travel Concierge`: Assembles a structured day-by-day schedule with per-day cost estimates, total budget tracking, and packing suggestions.
 - **💬 Conversational Replanning (`/api/revise-trip`)**: Refine generated itineraries with targeted follow-up feedback (e.g. "make day 3 more relaxing", "add vegetarian street food") processed by a dedicated concierge revision agent.
-- **❓ Live Destination Q&A (`/api/ask-question`)**: Ask follow-up travel questions about the selected destination (e.g. local transport tips, entrance fees, dress codes) with live web-search grounded answers.
+- **❓ Grounded Destination Q&A (`/api/ask-question`)**: Ask follow-up travel questions about the selected destination. Features automated query decomposition for compound questions (e.g. asking for *"famous biryani AND shopping malls with cinemas"*), preventing iteration starvation and ensuring 100% search-grounded local recommendations.
 - **📄 Pydantic Schema Validation & Cost Reconciliation**: Every pipeline task is validated against rigid Pydantic models (`backend/src/trip_planner/schemas/models.py`) with automatic post-validation reconciling `total_estimated_cost` with the sum of daily expenses.
 - **⚡ Fast Inference via Groq**: Uses Groq LLMs (`groq/qwen/qwen3.8-27b`) via CrewAI's `LLM` class (LiteLLM-backed) for low-latency planning with zero paid LLM subscription requirement.
 - **🔍 Zero-Cost Search & Scraping Tools**: DuckDuckGo search integration with query caching and static HTML website scraping tools.
