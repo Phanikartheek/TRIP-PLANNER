@@ -157,7 +157,7 @@ class TripPlannerCrew:
             config=self.agents_config["local_qa_expert"],
             tools=[self.search_tool, self.scrape_tool],
             llm=self.llm,
-            max_iter=5,
+            max_iter=10,
         )
 
     @task

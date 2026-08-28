@@ -72,9 +72,12 @@ answer_destination_question_task:
     The traveler is visiting {destination_city} and has asked the following specific question:
     "{question}"
 
-    Research the question using web search for real, current, named establishments (e.g. specific famous restaurant names and signature dishes, shopping malls, cinemas, cafes, or landmarks) in {destination_city}.
-    Provide a direct, helpful, and concise answer (3-6 sentences).
-    If the question cannot be answered from reliable information, state that clearly and honestly rather than making up details.
+    Instructions:
+    1. If the question has multiple parts or topics (e.g. asking about food/biryani AND shopping malls/cinemas), decompose the question and search for EACH part separately using web search before answering.
+    2. Do NOT repeat searches for the same sub-topic. Once you find 1-2 reliable places for the first part, immediately search for the remaining parts of the question.
+    3. Ground all recommendations strictly in real, named establishments located in {destination_city} (e.g. specific restaurant names, shopping malls with cinemas).
+    4. Do not answer any part using ungrounded memory or guess places from other cities — if you cannot find search results for a part, state that clearly and honestly rather than guessing.
+    5. Provide a direct, helpful, and concise answer (3-6 sentences).
   expected_output: >-
-    A concise, direct 3-6 sentence answer naming specific, real-world places in the destination city that directly answer the traveler's question.
+    A concise, direct 3-6 sentence answer naming specific, real-world places located in {destination_city} that directly address each part of the traveler's question.
   agent: local_qa_expert
