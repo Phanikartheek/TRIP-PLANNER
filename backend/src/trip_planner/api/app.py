@@ -14,21 +14,41 @@ from typing import Any
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
+from trip_planner.api import db
 from trip_planner.schemas.models import DestinationQuestion, QAResponse, RevisionRequest
 
 load_dotenv()
+
+# Initialize Rate Limiter keyed by remote IP
+limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title="AI Trip Planner API",
     description="Multi-agent trip planning engine with CrewAI and Groq",
     version="0.1.0",
 )
+app.state.limiter = limiter
+def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    from fastapi.responses import JSONResponse
+
+    response = JSONResponse(
+        {"error": f"Rate limit exceeded: {exc.detail}"},
+        status_code=429,
+    )
+    response.headers["Retry-After"] = "3600"
+    return response
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
 # Enable CORS for frontend integrations
 app.add_middleware(
@@ -38,6 +58,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def on_startup():
+    """Initializes the SQLite job store and reconciles interrupted jobs."""
+    db.init_db()
+
 
 # Locate frontend directory relative to project root
 API_DIR = Path(__file__).resolve().parent
@@ -49,6 +76,7 @@ if not FRONTEND_DIR.exists():
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
+
 @app.get("/style.css")
 async def serve_style():
     style_file = FRONTEND_DIR / "style.css"
@@ -56,15 +84,13 @@ async def serve_style():
         return FileResponse(str(style_file), media_type="text/css")
     raise HTTPException(status_code=404, detail="style.css not found")
 
+
 @app.get("/app.js")
 async def serve_app_js():
     js_file = FRONTEND_DIR / "app.js"
     if js_file.exists():
         return FileResponse(str(js_file), media_type="application/javascript")
     raise HTTPException(status_code=404, detail="app.js not found")
-
-# In-memory job store mapping job_id -> {status, result, error, created_at, inputs}
-JOB_STORE: dict[str, dict[str, Any]] = {}
 
 
 class TripPlanRequest(BaseModel):
@@ -98,7 +124,6 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
     if hasattr(result, "pydantic") and result.pydantic:
         return result.pydantic.model_dump()
     elif hasattr(result, "raw"):
-        import json
         try:
             return json.loads(result.raw)
         except Exception:
@@ -118,7 +143,6 @@ def _run_revision_sync(inputs: dict[str, Any]) -> dict[str, Any]:
     if hasattr(result, "pydantic") and result.pydantic:
         return result.pydantic.model_dump()
     elif hasattr(result, "raw"):
-        import json
         try:
             return json.loads(result.raw)
         except Exception:
@@ -130,28 +154,24 @@ async def _execute_trip_job(job_id: str, inputs: dict[str, Any]) -> None:
     """
     Background worker task running the CrewAI pipeline and storing results.
     """
-    JOB_STORE[job_id]["status"] = "running"
+    db.update_job(job_id, status="running")
     try:
         itinerary_data = await asyncio.to_thread(_run_crew_sync, inputs)
-        JOB_STORE[job_id]["status"] = "complete"
-        JOB_STORE[job_id]["result"] = itinerary_data
+        db.update_job(job_id, status="complete", result=itinerary_data)
     except Exception as e:
-        JOB_STORE[job_id]["status"] = "failed"
-        JOB_STORE[job_id]["error"] = str(e)
+        db.update_job(job_id, status="failed", error=str(e))
 
 
 async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
     """
     Background worker task running the single-agent revision task and storing results.
     """
-    JOB_STORE[job_id]["status"] = "running"
+    db.update_job(job_id, status="running")
     try:
         itinerary_data = await asyncio.to_thread(_run_revision_sync, inputs)
-        JOB_STORE[job_id]["status"] = "complete"
-        JOB_STORE[job_id]["result"] = itinerary_data
+        db.update_job(job_id, status="complete", result=itinerary_data)
     except Exception as e:
-        JOB_STORE[job_id]["status"] = "failed"
-        JOB_STORE[job_id]["error"] = str(e)
+        db.update_job(job_id, status="failed", error=str(e))
 
 
 def _run_qa_sync(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -225,7 +245,7 @@ async def _execute_qa_job(
     """
     Background worker task running the destination Q&A crew and storing results.
     """
-    JOB_STORE[job_id]["status"] = "running"
+    db.update_job(job_id, status="running")
     try:
         qa_data = await asyncio.to_thread(_run_qa_sync, inputs)
         qa_exchange = {
@@ -236,17 +256,15 @@ async def _execute_qa_job(
             "ungrounded_claims": qa_data.get("ungrounded_claims", []),
         }
 
-        if root_job_id in JOB_STORE:
-            JOB_STORE[root_job_id].setdefault("qa_history", []).append(qa_exchange)
-            qa_data["qa_history"] = list(JOB_STORE[root_job_id]["qa_history"])
-        else:
-            qa_data["qa_history"] = [qa_exchange]
+        root_job = db.get_job(root_job_id)
+        current_history = root_job.get("qa_history", []) if root_job else []
+        updated_history = current_history + [qa_exchange]
+        db.update_job(root_job_id, qa_history=updated_history)
 
-        JOB_STORE[job_id]["status"] = "complete"
-        JOB_STORE[job_id]["result"] = qa_data
+        qa_data["qa_history"] = updated_history
+        db.update_job(job_id, status="complete", result=qa_data)
     except Exception as e:
-        JOB_STORE[job_id]["status"] = "failed"
-        JOB_STORE[job_id]["error"] = str(e)
+        db.update_job(job_id, status="failed", error=str(e))
 
 
 @app.get("/api/health")
@@ -263,12 +281,13 @@ async def health_check():
 
 
 @app.post("/api/plan-trip", response_model=JobStatusResponse)
-async def plan_trip_endpoint(request: TripPlanRequest):
+@limiter.limit("5/hour")
+async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
     """
     Accepts trip parameters, initializes an async background job,
     and immediately returns a job_id for status polling.
     """
-    raw_mode = (request.travel_mode or "").strip().lower()
+    raw_mode = (payload.travel_mode or "").strip().lower()
     mode = raw_mode if raw_mode else "domestic"
 
     # Allowlist gate: Phase 1 strictly accepts domestic Indian travel
@@ -288,24 +307,16 @@ async def plan_trip_endpoint(request: TripPlanRequest):
         )
 
     crew_inputs = {
-        "origin": request.origin.strip(),
-        "cities": request.cities.strip(),
-        "interests": request.interests.strip(),
-        "trip_length": str(request.trip_length),
-        "budget": f"₹{request.budget:,.0f} {request.currency}" if request.currency == "INR" else f"{request.currency} {request.budget:,.0f}",
-        "currency": request.currency,
+        "origin": payload.origin.strip(),
+        "cities": payload.cities.strip(),
+        "interests": payload.interests.strip(),
+        "trip_length": str(payload.trip_length),
+        "budget": f"₹{payload.budget:,.0f} {payload.currency}" if payload.currency == "INR" else f"{payload.currency} {payload.budget:,.0f}",
+        "currency": payload.currency,
     }
 
     job_id = str(uuid.uuid4())
-    created_at = time.time()
-    JOB_STORE[job_id] = {
-        "job_id": job_id,
-        "status": "pending",
-        "result": None,
-        "error": None,
-        "created_at": created_at,
-        "inputs": crew_inputs,
-    }
+    job_rec = db.create_job(job_id=job_id, job_type="plan", status="pending")
 
     # Kick off asynchronous background execution
     asyncio.create_task(_execute_trip_job(job_id, crew_inputs))
@@ -313,20 +324,21 @@ async def plan_trip_endpoint(request: TripPlanRequest):
     return JobStatusResponse(
         job_id=job_id,
         status="pending",
-        created_at=created_at,
+        created_at=job_rec["created_at"],
     )
 
 
 @app.post("/api/revise-trip", response_model=JobStatusResponse)
-async def revise_trip_endpoint(request: RevisionRequest):
+@limiter.limit("10/hour")
+async def revise_trip_endpoint(request: Request, payload: RevisionRequest):
     """
     Accepts follow-up feedback on an existing completed itinerary,
     spawns a targeted single-agent revision task, and returns a new job_id.
     """
-    if request.job_id not in JOB_STORE:
+    orig_job = db.get_job(payload.job_id)
+    if not orig_job:
         raise HTTPException(status_code=404, detail="Original job not found")
 
-    orig_job = JOB_STORE[request.job_id]
     if orig_job.get("status") != "complete" or not orig_job.get("result"):
         raise HTTPException(
             status_code=400,
@@ -340,45 +352,41 @@ async def revise_trip_endpoint(request: RevisionRequest):
         )
 
     orig_itinerary = orig_job["result"]
-    import json
     itinerary_str = json.dumps(orig_itinerary, indent=2) if isinstance(orig_itinerary, dict) else str(orig_itinerary)
 
     revision_inputs = {
         "itinerary": itinerary_str,
-        "feedback": request.feedback.strip(),
+        "feedback": payload.feedback.strip(),
     }
 
     new_job_id = str(uuid.uuid4())
-    created_at = time.time()
-    JOB_STORE[new_job_id] = {
-        "job_id": new_job_id,
-        "status": "pending",
-        "result": None,
-        "error": None,
-        "created_at": created_at,
-        "inputs": revision_inputs,
-        "parent_job_id": request.job_id,
-    }
+    job_rec = db.create_job(
+        job_id=new_job_id,
+        job_type="revise",
+        status="pending",
+        parent_job_id=payload.job_id,
+    )
 
     asyncio.create_task(_execute_revision_job(new_job_id, revision_inputs))
 
     return JobStatusResponse(
         job_id=new_job_id,
         status="pending",
-        created_at=created_at,
+        created_at=job_rec["created_at"],
     )
 
 
 @app.post("/api/ask-question", response_model=JobStatusResponse)
-async def ask_question_endpoint(request: DestinationQuestion):
+@limiter.limit("15/hour")
+async def ask_question_endpoint(request: Request, payload: DestinationQuestion):
     """
     Accepts a direct question about a destination from an existing completed job,
     spawns a targeted single-agent Q&A task, and returns a job_id for status polling.
     """
-    if request.job_id not in JOB_STORE:
+    orig_job = db.get_job(payload.job_id)
+    if not orig_job:
         raise HTTPException(status_code=404, detail="Original job not found")
 
-    orig_job = JOB_STORE[request.job_id]
     if orig_job.get("status") != "complete" or not orig_job.get("result"):
         raise HTTPException(
             status_code=400,
@@ -397,17 +405,14 @@ async def ask_question_endpoint(request: DestinationQuestion):
         destination_city = (
             orig_result.get("destination_city")
             or orig_result.get("city")
-            or orig_job.get("inputs", {}).get("cities", "the destination")
+            or "the destination"
         )
 
     # Trace back to root planning job to access session QA history
-    root_job_id = request.job_id
-    curr = JOB_STORE[root_job_id]
-    while curr.get("parent_job_id") and curr.get("parent_job_id") in JOB_STORE:
-        root_job_id = curr["parent_job_id"]
-        curr = JOB_STORE[root_job_id]
+    root_job = db.get_root_job(payload.job_id)
+    root_job_id = root_job["job_id"] if root_job else payload.job_id
+    history_items = root_job.get("qa_history", []) if root_job else []
 
-    history_items = JOB_STORE[root_job_id].get("qa_history", [])
     if history_items:
         history_lines = []
         for idx, ex in enumerate(history_items, 1):
@@ -420,41 +425,36 @@ async def ask_question_endpoint(request: DestinationQuestion):
 
     qa_inputs = {
         "destination_city": str(destination_city),
-        "question": request.question.strip(),
+        "question": payload.question.strip(),
         "conversation_history": conversation_history_str,
     }
 
     new_job_id = str(uuid.uuid4())
-    created_at = time.time()
-    JOB_STORE[new_job_id] = {
-        "job_id": new_job_id,
-        "status": "pending",
-        "result": None,
-        "error": None,
-        "created_at": created_at,
-        "inputs": qa_inputs,
-        "parent_job_id": request.job_id,
-        "type": "destination_qa",
-    }
+    job_rec = db.create_job(
+        job_id=new_job_id,
+        job_type="qa",
+        status="pending",
+        parent_job_id=payload.job_id,
+    )
 
-    asyncio.create_task(_execute_qa_job(new_job_id, qa_inputs, root_job_id, request.question.strip()))
+    asyncio.create_task(_execute_qa_job(new_job_id, qa_inputs, root_job_id, payload.question.strip()))
 
     return JobStatusResponse(
         job_id=new_job_id,
         status="pending",
-        created_at=created_at,
+        created_at=job_rec["created_at"],
     )
 
 
 @app.get("/api/status/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str):
     """
-    Returns current status and results of a trip planning job.
+    Returns current status and results of a trip planning job from SQLite.
     """
-    if job_id not in JOB_STORE:
+    job = db.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    job = JOB_STORE[job_id]
     return JobStatusResponse(
         job_id=job_id,
         status=job["status"],
