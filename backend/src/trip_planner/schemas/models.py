@@ -103,3 +103,23 @@ class RevisionRequest(BaseModel):
         ..., description="User follow-up feedback, e.g. 'make day 2 cheaper' or 'replace trekking with beach time'"
     )
 
+
+class DestinationQuestion(BaseModel):
+    """User request payload to ask a direct question about a destination."""
+
+    job_id: str = Field(
+        ..., description="ID of the completed trip planning job to provide destination context"
+    )
+    question: str = Field(
+        ..., description="User question about the destination (e.g. food, shopping, cafes, transport)"
+    )
+
+
+class QuestionAnswer(BaseModel):
+    """Response payload containing direct answer to a destination question."""
+
+    answer: str = Field(..., description="Direct answer to the user's question")
+    sources: list[str] | None = Field(
+        default=None, description="Optional reference URLs from search results"
+    )
+

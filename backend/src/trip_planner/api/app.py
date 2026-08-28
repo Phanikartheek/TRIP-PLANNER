@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from trip_planner.schemas.models import RevisionRequest
+from trip_planner.schemas.models import DestinationQuestion, RevisionRequest
 
 load_dotenv()
 
@@ -47,6 +47,19 @@ if not FRONTEND_DIR.exists():
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
+@app.get("/style.css")
+async def serve_style():
+    style_file = FRONTEND_DIR / "style.css"
+    if style_file.exists():
+        return FileResponse(str(style_file), media_type="text/css")
+    raise HTTPException(status_code=404, detail="style.css not found")
+
+@app.get("/app.js")
+async def serve_app_js():
+    js_file = FRONTEND_DIR / "app.js"
+    if js_file.exists():
+        return FileResponse(str(js_file), media_type="application/javascript")
+    raise HTTPException(status_code=404, detail="app.js not found")
 
 # In-memory job store mapping job_id -> {status, result, error, created_at, inputs}
 JOB_STORE: dict[str, dict[str, Any]] = {}
@@ -134,6 +147,40 @@ async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
         itinerary_data = await asyncio.to_thread(_run_revision_sync, inputs)
         JOB_STORE[job_id]["status"] = "complete"
         JOB_STORE[job_id]["result"] = itinerary_data
+    except Exception as e:
+        JOB_STORE[job_id]["status"] = "failed"
+        JOB_STORE[job_id]["error"] = str(e)
+
+
+def _run_qa_sync(inputs: dict[str, Any]) -> dict[str, Any]:
+    """
+    Executes the specialized single-agent destination Q&A crew in a worker thread.
+    """
+    from trip_planner.crew import TripPlannerCrew
+
+    crew_instance = TripPlannerCrew().qa_crew()
+    result = crew_instance.kickoff(inputs=inputs)
+
+    raw_text = result.raw if hasattr(result, "raw") else str(result)
+    import re
+    urls = re.findall(r"https?://[^\s\)\],\"']+", raw_text)
+    unique_urls = list(dict.fromkeys(urls)) if urls else None
+
+    return {
+        "answer": raw_text.strip(),
+        "sources": unique_urls,
+    }
+
+
+async def _execute_qa_job(job_id: str, inputs: dict[str, Any]) -> None:
+    """
+    Background worker task running the destination Q&A crew and storing results.
+    """
+    JOB_STORE[job_id]["status"] = "running"
+    try:
+        qa_data = await asyncio.to_thread(_run_qa_sync, inputs)
+        JOB_STORE[job_id]["status"] = "complete"
+        JOB_STORE[job_id]["result"] = qa_data
     except Exception as e:
         JOB_STORE[job_id]["status"] = "failed"
         JOB_STORE[job_id]["error"] = str(e)
@@ -251,6 +298,64 @@ async def revise_trip_endpoint(request: RevisionRequest):
     }
 
     asyncio.create_task(_execute_revision_job(new_job_id, revision_inputs))
+
+    return JobStatusResponse(
+        job_id=new_job_id,
+        status="pending",
+        created_at=created_at,
+    )
+
+
+@app.post("/api/ask-question", response_model=JobStatusResponse)
+async def ask_question_endpoint(request: DestinationQuestion):
+    """
+    Accepts a direct question about a destination from an existing completed job,
+    spawns a targeted single-agent Q&A task, and returns a job_id for status polling.
+    """
+    if request.job_id not in JOB_STORE:
+        raise HTTPException(status_code=404, detail="Original job not found")
+
+    orig_job = JOB_STORE[request.job_id]
+    if orig_job.get("status") != "complete" or not orig_job.get("result"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot ask questions about a job that has not completed successfully",
+        )
+
+    if not os.getenv("GROQ_API_KEY"):
+        raise HTTPException(
+            status_code=500,
+            detail="GROQ_API_KEY is not configured in the environment or .env file.",
+        )
+
+    orig_result = orig_job["result"]
+    destination_city = "the destination"
+    if isinstance(orig_result, dict):
+        destination_city = (
+            orig_result.get("destination_city")
+            or orig_result.get("city")
+            or orig_job.get("inputs", {}).get("cities", "the destination")
+        )
+
+    qa_inputs = {
+        "destination_city": str(destination_city),
+        "question": request.question.strip(),
+    }
+
+    new_job_id = str(uuid.uuid4())
+    created_at = time.time()
+    JOB_STORE[new_job_id] = {
+        "job_id": new_job_id,
+        "status": "pending",
+        "result": None,
+        "error": None,
+        "created_at": created_at,
+        "inputs": qa_inputs,
+        "parent_job_id": request.job_id,
+        "type": "destination_qa",
+    }
+
+    asyncio.create_task(_execute_qa_job(new_job_id, qa_inputs))
 
     return JobStatusResponse(
         job_id=new_job_id,

@@ -13,8 +13,9 @@ express.
 import os
 import re
 import time
+from typing import Any
 
-import crewai.llms.cache
+import crewai
 import litellm
 from crewai import LLM, Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task
@@ -25,7 +26,16 @@ from trip_planner.tools import DuckDuckGoSearchTool, build_scrape_tool
 
 load_dotenv()
 litellm.drop_params = True
-crewai.llms.cache.mark_cache_breakpoint = lambda m: m
+
+try:
+    import crewai.llms.cache
+
+    def _mark_cache_breakpoint(message: dict[str, Any]) -> dict[str, Any]:
+        return message
+
+    crewai.llms.cache.mark_cache_breakpoint = _mark_cache_breakpoint
+except Exception:
+    pass
 
 _original_litellm_completion = litellm.completion
 
@@ -141,6 +151,15 @@ class TripPlannerCrew:
             max_iter=5,
         )
 
+    @agent
+    def local_qa_expert(self) -> Agent:
+        return Agent(
+            config=self.agents_config["local_qa_expert"],
+            tools=[self.search_tool, self.scrape_tool],
+            llm=self.llm,
+            max_iter=5,
+        )
+
     @task
     def select_city_task(self) -> Task:
         return Task(
@@ -169,6 +188,12 @@ class TripPlannerCrew:
             output_pydantic=TripItinerary,
         )
 
+    @task
+    def answer_destination_question_task(self) -> Task:
+        return Task(
+            config=self.tasks_config["answer_destination_question_task"],
+        )
+
     @crew
     def crew(self) -> Crew:
         return Crew(
@@ -188,6 +213,23 @@ class TripPlannerCrew:
             config=self.tasks_config["revise_itinerary_task"],
             agent=agent_instance,
             output_pydantic=TripItinerary,
+        )
+        return Crew(
+            agents=[agent_instance],
+            tasks=[task_instance],
+            process=Process.sequential,
+            verbose=True,
+        )
+
+    def qa_crew(self) -> Crew:
+        """
+        Specialized single-agent crew for answering direct destination questions.
+        Outputs a direct text answer with real named establishments.
+        """
+        agent_instance = self.local_qa_expert()
+        task_instance = Task(
+            config=self.tasks_config["answer_destination_question_task"],
+            agent=agent_instance,
         )
         return Crew(
             agents=[agent_instance],

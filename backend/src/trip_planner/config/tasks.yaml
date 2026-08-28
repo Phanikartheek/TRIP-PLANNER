@@ -34,6 +34,7 @@ plan_itinerary_task:
     build a day-by-day itinerary for the full {trip_length}-day trip.
     Each day must have a theme, and a morning/afternoon/evening plan.
     Ground activity choices in the attractions and food already researched.
+    ALWAYS specify real, famous, iconic spots by name (e.g., exact well-known restaurants with must-try signature dishes, trending cafes, popular shopping malls/cinemas, and scenic landmarks) rather than generic descriptions.
     Estimate per-day costs (estimated_cost) and total trip cost (total_estimated_cost)
     strictly in the traveler's budget currency, staying within the overall budget of {budget}.
     Ensure the total_estimated_cost is exactly equal to the arithmetic sum of the individual
@@ -57,10 +58,23 @@ revise_itinerary_task:
     "{feedback}"
 
     Intelligently revise the itinerary based strictly on the user's feedback:
-    1. Apply ONLY the modifications directly requested or necessary based on the feedback.
-    2. Preserve all other existing days, themes, activities, attractions, and costs that were NOT affected by the feedback.
-    3. If any day's activities or costs change, re-estimate that day's cost (estimated_cost) and ensure total_estimated_cost is updated to exactly equal the sum of all day costs.
-    4. Keep the packing suggestions, destination, currency, and transit advice intact or adjust them if specifically affected by the feedback.
+    1. If the traveler asks for food, biryani, restaurants, cafes, shopping malls, cinemas, or specific attractions, ALWAYS identify and insert real, famous, iconic local spots by exact name (e.g. renowned local restaurants and specific signature dishes, popular shopping malls, trending cafes, and entertainment hubs in that city) into the daily morning/afternoon/evening itinerary. Use web search if needed.
+    2. Apply the modifications directly requested or necessary based on the feedback.
+    3. Preserve all other existing days, themes, activities, attractions, and costs that were NOT affected by the feedback.
+    4. If any day's activities or costs change, re-estimate that day's cost (estimated_cost) and ensure total_estimated_cost is updated to exactly equal the sum of all day costs.
+    5. Keep the packing suggestions, destination, currency, and transit advice intact or adjust them if specifically affected by the feedback.
   expected_output: >-
-    A complete revised TripItinerary model reflecting the user's requested changes while preserving the rest of the original itinerary.
+    A complete revised TripItinerary model reflecting the user's requested changes with specific named places and restaurants while preserving the rest of the original itinerary.
   agent: travel_concierge
+
+answer_destination_question_task:
+  description: >-
+    The traveler is visiting {destination_city} and has asked the following specific question:
+    "{question}"
+
+    Research the question using web search for real, current, named establishments (e.g. specific famous restaurant names and signature dishes, shopping malls, cinemas, cafes, or landmarks) in {destination_city}.
+    Provide a direct, helpful, and concise answer (3-6 sentences).
+    If the question cannot be answered from reliable information, state that clearly and honestly rather than making up details.
+  expected_output: >-
+    A concise, direct 3-6 sentence answer naming specific, real-world places in the destination city that directly answer the traveler's question.
+  agent: local_qa_expert

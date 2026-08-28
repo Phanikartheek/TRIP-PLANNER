@@ -159,3 +159,44 @@ def test_revise_trip_endpoint_rejects_invalid_or_incomplete_job():
     assert res_400.status_code == 400
     assert "not completed" in res_400.json()["detail"].lower()
 
+
+def test_qa_crew_uses_only_local_qa_expert(crew_instance):
+    """Confirm the Q&A crew is single-agent and uses only local_qa_expert."""
+    crew = crew_instance.qa_crew()
+    assert len(crew.agents) == 1
+    assert crew.agents[0].role == "Local Q&A Expert"
+    assert len(crew.tasks) == 1
+    assert crew.tasks[0].agent.role == "Local Q&A Expert"
+
+
+def test_destination_question_schema_validation():
+    """Confirm DestinationQuestion accepts valid payload and rejects missing fields."""
+    from trip_planner.schemas.models import DestinationQuestion
+
+    req = DestinationQuestion(job_id="test-job-uuid", question="Where is the best biryani?")
+    assert req.job_id == "test-job-uuid"
+    assert req.question == "Where is the best biryani?"
+
+    with pytest.raises(ValueError):
+        DestinationQuestion(job_id="only-job-id")  # missing question
+
+
+def test_ask_question_endpoint_rejects_invalid_or_incomplete_job():
+    """Confirm POST /api/ask-question with non-existent or incomplete job_id returns 404/400."""
+    from fastapi.testclient import TestClient
+    from trip_planner.api.app import JOB_STORE, app
+
+    client = TestClient(app)
+
+    # 1. Non-existent job_id -> 404
+    res_404 = client.post("/api/ask-question", json={"job_id": "non-existent-uuid", "question": "Where is good biryani?"})
+    assert res_404.status_code == 404
+    assert "not found" in res_404.json()["detail"].lower()
+
+    # 2. Pending job_id -> 400
+    JOB_STORE["pending-job-uuid-qa"] = {"job_id": "pending-job-uuid-qa", "status": "pending", "result": None}
+    res_400 = client.post("/api/ask-question", json={"job_id": "pending-job-uuid-qa", "question": "Where is good biryani?"})
+    assert res_400.status_code == 400
+    assert "not completed" in res_400.json()["detail"].lower()
+
+

@@ -52,6 +52,47 @@ document.addEventListener('DOMContentLoaded', () => {
   const daysTimeline = document.getElementById('days-timeline');
   const packingGrid = document.getElementById('packing-grid');
 
+  // Backend API Base URL Configuration (Supports FastAPI on :8000, VSCode Live Server on :5500, or file:// preview)
+  const API_BASE = (window.location.protocol === 'file:' || (window.location.port && window.location.port !== '8000'))
+    ? 'http://127.0.0.1:8000'
+    : '';
+
+  // Backend Status Badge
+  const backendStatusBadge = document.getElementById('backend-status-badge');
+  const statusDot = document.getElementById('status-dot');
+  const statusText = document.getElementById('status-text');
+
+  async function checkBackendHealth() {
+    if (!backendStatusBadge || !statusText) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/health`);
+      if (res.ok) {
+        const data = await res.json();
+        backendStatusBadge.className = 'backend-status-badge status-connected';
+        backendStatusBadge.title = `Connected to backend (Model: ${data.default_model || 'Groq'})`;
+        statusText.textContent = data.groq_configured ? '🟢 Backend Connected' : '🟡 Backend Online (No API Key)';
+      } else {
+        throw new Error(`HTTP ${res.status}`);
+      }
+    } catch (err) {
+      backendStatusBadge.className = 'backend-status-badge status-disconnected';
+      backendStatusBadge.title = `Cannot connect to backend at ${API_BASE || 'http://127.0.0.1:8000'}. Click to retry.`;
+      statusText.textContent = '🔴 Backend Offline (Click to Retry)';
+    }
+  }
+
+  if (backendStatusBadge) {
+    backendStatusBadge.addEventListener('click', () => {
+      backendStatusBadge.className = 'backend-status-badge status-checking';
+      if (statusText) statusText.textContent = 'Retrying Connection...';
+      checkBackendHealth();
+    });
+  }
+
+  // Check health immediately and periodically
+  checkBackendHealth();
+  setInterval(checkBackendHealth, 15000);
+
   // State Management
   let currentMode = 'domestic'; // 'domestic' | 'international'
   let currentCurrency = 'INR'; // 'INR' | 'USD' | 'EUR'
@@ -401,7 +442,7 @@ document.addEventListener('DOMContentLoaded', () => {
     startAgentProgressAnimation();
 
     try {
-      const response = await fetch('/api/plan-trip', {
+      const response = await fetch(`${API_BASE}/api/plan-trip`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -418,14 +459,14 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error('No job ID returned by server.');
       }
 
-      // Poll /api/status/{job_id} every 3 seconds until completed or failed
+      // Poll ${API_BASE}/api/status/{job_id} every 3 seconds until completed or failed
       let jobStatus = initData.status || 'pending';
       let itineraryData = null;
 
       while (jobStatus === 'pending' || jobStatus === 'running') {
         await new Promise(resolve => setTimeout(resolve, 3000));
 
-        const statusRes = await fetch(`/api/status/${jobId}`);
+        const statusRes = await fetch(`${API_BASE}/api/status/${jobId}`);
         if (!statusRes.ok) {
           const errData = await statusRes.json().catch(() => ({}));
           throw new Error(errData.detail || `Failed to check job status (${statusRes.status})`);
@@ -450,7 +491,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     } catch (err) {
       console.error('Plan trip error:', err);
-      showToast(`❌ Error: ${err.message}`);
+      const msg = err.message === 'Failed to fetch'
+        ? `Could not connect to backend server. Make sure the server is running on ${API_BASE || 'http://127.0.0.1:8000'}`
+        : err.message;
+      showToast(`❌ Error: ${msg}`);
       resetAgentCards();
     } finally {
       submitBtn.disabled = false;
@@ -485,7 +529,7 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
 
       try {
-        const response = await fetch('/api/revise-trip', {
+        const response = await fetch(`${API_BASE}/api/revise-trip`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ job_id: currentJobId, feedback }),
@@ -503,7 +547,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         while (jobStatus === 'pending' || jobStatus === 'running') {
           await new Promise(resolve => setTimeout(resolve, 3000));
-          const statusRes = await fetch(`/api/status/${newJobId}`);
+          const statusRes = await fetch(`${API_BASE}/api/status/${newJobId}`);
           if (!statusRes.ok) {
             const errData = await statusRes.json().catch(() => ({}));
             throw new Error(errData.detail || `Failed to check status (${statusRes.status})`);
@@ -529,10 +573,104 @@ document.addEventListener('DOMContentLoaded', () => {
 
       } catch (err) {
         console.error('Revision error:', err);
-        showToast(`❌ Revision Error: ${err.message}`);
+        const msg = err.message === 'Failed to fetch'
+          ? `Could not connect to backend server. Make sure the server is running on ${API_BASE || 'http://127.0.0.1:8000'}`
+          : err.message;
+        showToast(`❌ Revision Error: ${msg}`);
       } finally {
         revisionBtn.disabled = false;
         revisionBtn.innerHTML = `<span>✨ Revise Itinerary</span>`;
+      }
+    });
+  }
+
+  // --- Destination Q&A Form Handler ---
+  const qaForm = document.getElementById('qa-form');
+  const qaInput = document.getElementById('qa-input');
+  const qaBtn = document.getElementById('qa-btn');
+  const qaAnswerBox = document.getElementById('qa-answer-box');
+  const qaAnswerText = document.getElementById('qa-answer-text');
+  const qaSourcesList = document.getElementById('qa-sources-list');
+
+  if (qaForm) {
+    qaForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const question = qaInput.value.trim();
+      if (!question) {
+        showToast('⚠️ Please enter your question.');
+        return;
+      }
+      if (!currentJobId) {
+        showToast('⚠️ Please generate a trip first before asking destination questions.');
+        return;
+      }
+
+      qaBtn.disabled = true;
+      qaBtn.innerHTML = `
+        <div class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;"></div>
+        <span>Consulting Local Q&A Expert...</span>
+      `;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/ask-question`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ job_id: currentJobId, question }),
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.detail || `Question request failed (${response.status})`);
+        }
+
+        const initData = await response.json();
+        const qaJobId = initData.job_id;
+        let jobStatus = initData.status || 'pending';
+        let qaResult = null;
+
+        while (jobStatus === 'pending' || jobStatus === 'running') {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const statusRes = await fetch(`${API_BASE}/api/status/${qaJobId}`);
+          if (!statusRes.ok) {
+            const errData = await statusRes.json().catch(() => ({}));
+            throw new Error(errData.detail || `Failed to check status (${statusRes.status})`);
+          }
+          const statusData = await statusRes.json();
+          jobStatus = statusData.status;
+
+          if (jobStatus === 'complete') {
+            qaResult = statusData.result;
+            break;
+          } else if (jobStatus === 'failed') {
+            throw new Error(statusData.error || 'Q&A job failed on server.');
+          }
+        }
+
+        if (qaResult) {
+          const answerText = qaResult.answer || (typeof qaResult === 'string' ? qaResult : JSON.stringify(qaResult));
+          qaAnswerText.textContent = answerText;
+
+          if (qaResult.sources && Array.isArray(qaResult.sources) && qaResult.sources.length > 0) {
+            qaSourcesList.innerHTML = `<strong>Sources:</strong> ` + qaResult.sources.map(url => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`).join(', ');
+            qaSourcesList.classList.remove('hidden');
+          } else {
+            qaSourcesList.innerHTML = '';
+            qaSourcesList.classList.add('hidden');
+          }
+
+          qaAnswerBox.classList.remove('hidden');
+          showToast('✅ Question answered by Local Expert!');
+        }
+
+      } catch (err) {
+        console.error('Q&A error:', err);
+        const msg = err.message === 'Failed to fetch'
+          ? `Could not connect to backend server. Make sure the server is running on ${API_BASE || 'http://127.0.0.1:8000'}`
+          : err.message;
+        showToast(`❌ Q&A Error: ${msg}`);
+      } finally {
+        qaBtn.disabled = false;
+        qaBtn.innerHTML = `<span>🔍 Ask Question</span>`;
       }
     });
   }
