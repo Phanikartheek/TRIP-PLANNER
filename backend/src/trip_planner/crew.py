@@ -164,6 +164,7 @@ class TripPlannerCrew:
     def select_city_task(self) -> Task:
         return Task(
             config=self.tasks_config["select_city_task"],
+            agent=self.city_selector(),
             output_pydantic=CitySelection,
         )
 
@@ -171,6 +172,7 @@ class TripPlannerCrew:
     def gather_city_info_task(self) -> Task:
         return Task(
             config=self.tasks_config["gather_city_info_task"],
+            agent=self.local_expert(),
             output_pydantic=CityGuide,
         )
 
@@ -178,6 +180,7 @@ class TripPlannerCrew:
     def plan_itinerary_task(self) -> Task:
         return Task(
             config=self.tasks_config["plan_itinerary_task"],
+            agent=self.travel_concierge(),
             output_pydantic=TripItinerary,
         )
 
@@ -185,6 +188,7 @@ class TripPlannerCrew:
     def revise_itinerary_task(self) -> Task:
         return Task(
             config=self.tasks_config["revise_itinerary_task"],
+            agent=self.travel_concierge(),
             output_pydantic=TripItinerary,
         )
 
@@ -192,6 +196,7 @@ class TripPlannerCrew:
     def answer_destination_question_task(self) -> Task:
         return Task(
             config=self.tasks_config["answer_destination_question_task"],
+            agent=self.local_qa_expert(),
         )
 
     @crew
