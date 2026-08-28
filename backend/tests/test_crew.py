@@ -144,7 +144,6 @@ def test_revision_request_schema_validation():
 def test_revise_trip_endpoint_rejects_invalid_or_incomplete_job():
     """Confirm POST /api/revise-trip with non-existent or incomplete job_id returns 404/400."""
     from fastapi.testclient import TestClient
-
     from trip_planner.api import db
     from trip_planner.api.app import app
 
@@ -223,7 +222,6 @@ def test_qa_response_schema_validation_with_grounding_claims():
 def test_ask_question_multi_turn_history_passed_to_context():
     """Confirm conversation history from Turn 1 is passed into Turn 2's context."""
     from fastapi.testclient import TestClient
-
     from trip_planner.api import db
     from trip_planner.api.app import app
 
@@ -264,7 +262,6 @@ def test_ask_question_multi_turn_history_passed_to_context():
 def test_ask_question_endpoint_rejects_invalid_or_incomplete_job():
     """Confirm POST /api/ask-question with non-existent or incomplete job_id returns 404/400."""
     from fastapi.testclient import TestClient
-
     from trip_planner.api import db
     from trip_planner.api.app import app
 
