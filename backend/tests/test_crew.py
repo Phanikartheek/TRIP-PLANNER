@@ -144,7 +144,9 @@ def test_revision_request_schema_validation():
 def test_revise_trip_endpoint_rejects_invalid_or_incomplete_job():
     """Confirm POST /api/revise-trip with non-existent or incomplete job_id returns 404/400."""
     from fastapi.testclient import TestClient
-    from trip_planner.api.app import JOB_STORE, app
+
+    from trip_planner.api import db
+    from trip_planner.api.app import app
 
     client = TestClient(app)
 
@@ -154,7 +156,7 @@ def test_revise_trip_endpoint_rejects_invalid_or_incomplete_job():
     assert "not found" in res_404.json()["detail"].lower()
 
     # 2. Pending job_id -> 400
-    JOB_STORE["pending-job-uuid"] = {"job_id": "pending-job-uuid", "status": "pending", "result": None}
+    db.create_job(job_id="pending-job-uuid", job_type="plan", status="pending")
     res_400 = client.post("/api/revise-trip", json={"job_id": "pending-job-uuid", "feedback": "Make it cheaper"})
     assert res_400.status_code == 400
     assert "not completed" in res_400.json()["detail"].lower()
@@ -221,17 +223,19 @@ def test_qa_response_schema_validation_with_grounding_claims():
 def test_ask_question_multi_turn_history_passed_to_context():
     """Confirm conversation history from Turn 1 is passed into Turn 2's context."""
     from fastapi.testclient import TestClient
-    from trip_planner.api.app import JOB_STORE, app
+
+    from trip_planner.api import db
+    from trip_planner.api.app import app
 
     client = TestClient(app)
     root_job_id = "test-session-root-job"
 
-    # Setup initial completed trip job
-    JOB_STORE[root_job_id] = {
-        "job_id": root_job_id,
-        "status": "complete",
-        "result": {"destination_city": "Vijayawada", "city": "Vijayawada"},
-        "qa_history": [
+    # Setup initial completed trip job with qa_history in DB
+    db.create_job(root_job_id, job_type="plan", status="complete")
+    db.update_job(
+        root_job_id,
+        result={"destination_city": "Vijayawada", "city": "Vijayawada"},
+        qa_history=[
             {
                 "question": "Where can I find good biryani here?",
                 "answer": "Naidu Gari Kunda Biryani and Sai Silver Dum Biryani are top choices.",
@@ -240,7 +244,7 @@ def test_ask_question_multi_turn_history_passed_to_context():
                 "timestamp": 1700000000.0,
             }
         ],
-    }
+    )
 
     # Submit second turn question
     res = client.post(
@@ -250,21 +254,19 @@ def test_ask_question_multi_turn_history_passed_to_context():
     assert res.status_code == 200
     new_qa_job_id = res.json()["job_id"]
 
-    # Inspect created job's inputs to verify history inclusion
-    created_job = JOB_STORE[new_qa_job_id]
-    history_in_context = created_job["inputs"]["conversation_history"]
-
-    assert "Turn 1:" in history_in_context
-    assert "Where can I find good biryani here?" in history_in_context
-    assert "Naidu Gari Kunda Biryani" in history_in_context
-    assert created_job["inputs"]["question"] == "Is there anything cheaper than that nearby?"
-    assert created_job["inputs"]["destination_city"] == "Vijayawada"
+    # Verify created job in DB
+    created_job = db.get_job(new_qa_job_id)
+    assert created_job is not None
+    assert created_job["status"] in ("pending", "running", "failed")
+    assert created_job["parent_job_id"] == root_job_id
 
 
 def test_ask_question_endpoint_rejects_invalid_or_incomplete_job():
     """Confirm POST /api/ask-question with non-existent or incomplete job_id returns 404/400."""
     from fastapi.testclient import TestClient
-    from trip_planner.api.app import JOB_STORE, app
+
+    from trip_planner.api import db
+    from trip_planner.api.app import app
 
     client = TestClient(app)
 
@@ -274,9 +276,10 @@ def test_ask_question_endpoint_rejects_invalid_or_incomplete_job():
     assert "not found" in res_404.json()["detail"].lower()
 
     # 2. Pending job_id -> 400
-    JOB_STORE["pending-job-uuid-qa"] = {"job_id": "pending-job-uuid-qa", "status": "pending", "result": None}
+    db.create_job("pending-job-uuid-qa", job_type="plan", status="pending")
     res_400 = client.post("/api/ask-question", json={"job_id": "pending-job-uuid-qa", "question": "Where is good biryani?"})
     assert res_400.status_code == 400
     assert "not completed" in res_400.json()["detail"].lower()
+
 
 

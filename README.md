@@ -41,6 +41,8 @@ Your default browser will automatically open **[http://127.0.0.1:8000](http://12
 - **📄 Pydantic Schema Validation & Cost Reconciliation**: Every pipeline task is validated against rigid Pydantic models (`backend/src/trip_planner/schemas/models.py`) with automatic post-validation reconciling `total_estimated_cost` with the sum of daily expenses.
 - **⚡ Fast Inference via Groq**: Uses Groq LLMs (`groq/qwen/qwen3.8-27b`) via CrewAI's `LLM` class (LiteLLM-backed) for low-latency planning with zero paid LLM subscription requirement.
 - **🔍 Zero-Cost Search & Scraping Tools**: DuckDuckGo search integration with query caching and static HTML website scraping tools.
+- **⏱️ SlowAPI Rate Limiting Protection**: IP-keyed request rate limiting protecting expensive LLM endpoints (`/api/plan-trip` 5/hr, `/api/revise-trip` 10/hr, `/api/ask-question` 15/hr) with HTTP 429 and `Retry-After` headers.
+- **💾 Persistent SQLite Job Store**: Robust local database layer replacing ephemeral memory dictionaries, persisting trip jobs, revision lineage, and multi-turn QA history across server restarts with automatic startup crash reconciliation.
 - **🌐 Interactive Web Dashboard**: Responsive dark glassmorphic UI with domestic destination presets, dietary preference filters, budget slider, and live agent execution progress tracking.
 - **🛡️ Phase 1 Allowlist Gate**: Backend validation on `/api/plan-trip` enforcing domestic Indian travel mode and rejecting unready international requests with clear Phase 2 messaging.
 - **📋 Export Options**: One-click Copy JSON, Download Markdown, and Print / PDF export.
