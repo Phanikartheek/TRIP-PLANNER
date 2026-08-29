@@ -128,8 +128,8 @@ class TripPlannerCrew:
 
     @agent
     def city_selector(self) -> Agent:
-        return Agent(
-            config=self.agents_config["city_selector"],  # type: ignore[call-arg]
+        return Agent(  # type: ignore # pyright: ignore
+            config=self.agents_config["city_selector"],
             tools=[self.search_tool],
             llm=self.llm,
             max_iter=5,
@@ -137,8 +137,8 @@ class TripPlannerCrew:
 
     @agent
     def local_expert(self) -> Agent:
-        return Agent(
-            config=self.agents_config["local_expert"],  # type: ignore[call-arg]
+        return Agent(  # type: ignore # pyright: ignore
+            config=self.agents_config["local_expert"],
             tools=[self.search_tool, self.scrape_tool],
             llm=self.llm,
             max_iter=5,
@@ -146,8 +146,8 @@ class TripPlannerCrew:
 
     @agent
     def travel_concierge(self) -> Agent:
-        return Agent(
-            config=self.agents_config["travel_concierge"],  # type: ignore[call-arg]
+        return Agent(  # type: ignore # pyright: ignore
+            config=self.agents_config["travel_concierge"],
             tools=[self.search_tool],
             llm=self.llm,
             max_iter=5,
@@ -155,8 +155,8 @@ class TripPlannerCrew:
 
     @agent
     def local_qa_expert(self) -> Agent:
-        return Agent(
-            config=self.agents_config["local_qa_expert"],  # type: ignore[call-arg]
+        return Agent(  # type: ignore # pyright: ignore
+            config=self.agents_config["local_qa_expert"],
             tools=[self.search_tool, self.scrape_tool],
             llm=self.llm,
             max_iter=10,
@@ -164,40 +164,40 @@ class TripPlannerCrew:
 
     @task
     def select_city_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["select_city_task"],  # type: ignore[call-arg]
+        return Task(  # type: ignore # pyright: ignore
+            config=self.tasks_config["select_city_task"],
             agent=self.city_selector(),
             output_pydantic=CitySelection,
         )
 
     @task
     def gather_city_info_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["gather_city_info_task"],  # type: ignore[call-arg]
+        return Task(  # type: ignore # pyright: ignore
+            config=self.tasks_config["gather_city_info_task"],
             agent=self.local_expert(),
             output_pydantic=CityGuide,
         )
 
     @task
     def plan_itinerary_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["plan_itinerary_task"],  # type: ignore[call-arg]
+        return Task(  # type: ignore # pyright: ignore
+            config=self.tasks_config["plan_itinerary_task"],
             agent=self.travel_concierge(),
             output_pydantic=TripItinerary,
         )
 
     @task
     def revise_itinerary_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["revise_itinerary_task"],  # type: ignore[call-arg]
+        return Task(  # type: ignore # pyright: ignore
+            config=self.tasks_config["revise_itinerary_task"],
             agent=self.travel_concierge(),
             output_pydantic=TripItinerary,
         )
 
     @task
     def answer_destination_question_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["answer_destination_question_task"],  # type: ignore[call-arg]
+        return Task(  # type: ignore # pyright: ignore
+            config=self.tasks_config["answer_destination_question_task"],
             agent=self.local_qa_expert(),
             output_pydantic=QAResponse,
         )
@@ -217,8 +217,8 @@ class TripPlannerCrew:
         Skips city selection and local research agents to revise existing itineraries quickly.
         """
         agent_instance = self.travel_concierge()
-        task_instance = Task(
-            config=self.tasks_config["revise_itinerary_task"],  # type: ignore[call-arg]
+        task_instance = Task(  # type: ignore # pyright: ignore
+            config=self.tasks_config["revise_itinerary_task"],
             agent=agent_instance,
             output_pydantic=TripItinerary,
         )
@@ -235,8 +235,8 @@ class TripPlannerCrew:
         Outputs a structured QAResponse model with grounded/ungrounded claims.
         """
         agent_instance = self.local_qa_expert()
-        task_instance = Task(
-            config=self.tasks_config["answer_destination_question_task"],  # type: ignore[call-arg]
+        task_instance = Task(  # type: ignore # pyright: ignore
+            config=self.tasks_config["answer_destination_question_task"],
             agent=agent_instance,
             output_pydantic=QAResponse,
         )
