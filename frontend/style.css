@@ -1563,3 +1563,236 @@ h1, h2, h3, h4, .brand-font {
   gap: 0.5rem;
 }
 
+/* Range Slider Mobile Touch Support */
+.range-slider {
+  touch-action: manipulation;
+  height: 10px;
+  cursor: pointer;
+}
+
+.range-slider::-webkit-slider-thumb {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.6);
+  cursor: pointer;
+}
+
+.range-slider::-moz-range-thumb {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.6);
+  cursor: pointer;
+}
+
+/* Mobile & Tablet Comprehensive Media Queries (768px, 480px, 390px, 375px) */
+@media (max-width: 768px) {
+  body {
+    padding: 0.75rem 0.5rem;
+    font-size: 15px;
+  }
+
+  .header {
+    margin-bottom: 1.5rem;
+  }
+
+  .header-badges {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .main-title {
+    font-size: 1.85rem;
+    line-height: 1.25;
+  }
+
+  .sub-title {
+    font-size: 0.95rem;
+    padding: 0 0.5rem;
+  }
+
+  .glass-card {
+    padding: 1.25rem 1rem;
+    border-radius: var(--radius-md);
+  }
+
+  .card-top-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1rem;
+  }
+
+  .currency-selector, .travel-style-selector, .language-selector {
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+  }
+
+  .custom-select, .form-input {
+    width: 100%;
+    min-height: 44px;
+    font-size: 1rem;
+    box-sizing: border-box;
+  }
+
+  .curr-pill {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+  }
+
+  .mode-toggle-container {
+    flex-direction: column;
+    width: 100%;
+    gap: 0.5rem;
+  }
+
+  .mode-btn {
+    width: 100%;
+    min-height: 48px;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
+  .form-group-full {
+    grid-column: span 1;
+  }
+
+  .quick-chip {
+    min-height: 44px;
+    padding: 0.4rem 0.85rem;
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.85rem;
+  }
+
+  .interest-tag, .food-pill {
+    min-height: 44px;
+    padding: 0.5rem 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.88rem;
+  }
+
+  .btn-submit {
+    min-height: 48px;
+    font-size: 1rem;
+    padding: 0.85rem 1rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .agents-pipeline {
+    grid-template-columns: 1fr;
+  }
+
+  .dest-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 1.25rem;
+  }
+
+  .dest-city {
+    font-size: 1.8rem;
+  }
+
+  .dest-metrics {
+    width: 100%;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .metric-box {
+    width: 100%;
+    text-align: left;
+    box-sizing: border-box;
+  }
+
+  .highlights-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .day-card-header {
+    padding: 1rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .day-meta {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .day-body {
+    padding: 0 1rem 1rem;
+  }
+
+  .activity-desc {
+    font-size: 0.95rem;
+    line-height: 1.55;
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+
+  .cost-tooltip {
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 250px;
+    bottom: 120%;
+  }
+
+  .packing-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .checklist-item {
+    min-height: 44px;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .btn-secondary {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  .modal-content {
+    width: 94%;
+    padding: 1.35rem 1rem;
+    box-sizing: border-box;
+  }
+}
+
+@media (max-width: 390px) {
+  body {
+    padding: 0.5rem 0.25rem;
+  }
+
+  .main-title {
+    font-size: 1.6rem;
+  }
+
+  .dest-city {
+    font-size: 1.55rem;
+  }
+}
+
+

@@ -944,6 +944,35 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --- Export Actions ---
+  const btnShareLink = document.getElementById('btn-copy-share-link');
+  if (btnShareLink) {
+    btnShareLink.addEventListener('click', () => {
+      if (!currentJobId) {
+        showToast('❌ No active trip found to share', 'error');
+        return;
+      }
+      const shareUrl = `${window.location.origin}/share.html?id=${currentJobId}`;
+      navigator.clipboard.writeText(shareUrl)
+        .then(() => showToast('🔗 Shareable trip link copied to clipboard!'))
+        .catch(() => showToast('❌ Failed to copy link to clipboard', 'error'));
+    });
+  }
+
+  // --- Mobile Touch Tap Listener for Cost Breakdown Tooltips ---
+  document.addEventListener('click', (e) => {
+    const wrapper = e.target.closest('.day-cost-wrapper');
+    if (wrapper) {
+      // Toggle active class on tap for mobile screens
+      const isAlreadyActive = wrapper.classList.contains('active');
+      document.querySelectorAll('.day-cost-wrapper.active').forEach(w => w.classList.remove('active'));
+      if (!isAlreadyActive) {
+        wrapper.classList.add('active');
+      }
+    } else {
+      document.querySelectorAll('.day-cost-wrapper.active').forEach(w => w.classList.remove('active'));
+    }
+  });
+
   document.getElementById('btn-copy-json').addEventListener('click', () => {
     if (!currentItinerary) return;
     navigator.clipboard.writeText(JSON.stringify(currentItinerary, null, 2))
