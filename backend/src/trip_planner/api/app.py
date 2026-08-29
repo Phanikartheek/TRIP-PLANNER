@@ -414,6 +414,48 @@ async def serve_my_trips():
     raise HTTPException(status_code=404, detail="my-trips.html not found")
 
 
+@app.get("/share")
+@app.get("/share.html")
+async def serve_share():
+    share_file = FRONTEND_DIR / "share.html"
+    if share_file.exists():
+        return FileResponse(str(share_file))
+    raise HTTPException(status_code=404, detail="share.html not found")
+
+
+@app.get("/api/trip/{job_id}/share")
+async def get_shareable_trip(job_id: str):
+    """
+    Public, read-only endpoint for sharing completed itineraries.
+    Returns 404 for nonexistent, pending, running, or failed jobs.
+    Strips user_email, qa_history, and internal job metadata.
+    """
+    job = db.get_job(job_id)
+    if not job or job.get("status") != "complete":
+        raise HTTPException(
+            status_code=404,
+            detail="Shared trip itinerary not found or processing is not complete.",
+        )
+
+    result = job.get("result")
+    if not result or not isinstance(result, dict):
+        raise HTTPException(status_code=404, detail="Itinerary data is unavailable.")
+
+    # Explicitly clean and ensure strictly public TripItinerary fields
+    clean_itinerary = {
+        "destination_city": result.get("destination_city"),
+        "destination_country": result.get("destination_country"),
+        "trip_length_days": result.get("trip_length_days"),
+        "currency": result.get("currency", "INR"),
+        "total_estimated_cost": result.get("total_estimated_cost"),
+        "days": result.get("days", []),
+        "packing_suggestions": result.get("packing_suggestions", []),
+        "local_transport_advice": result.get("local_transport_advice", []),
+    }
+    return clean_itinerary
+
+
+
 @app.post("/api/auth/request-login")
 @limiter.limit("3/hour")
 async def request_login_endpoint(request: Request, payload: LoginRequest):

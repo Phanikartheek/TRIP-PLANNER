@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shared Trip Itinerary - AI Trip Planner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Ambient Background Glows -->
+  <div class="bg-glow glow-1"></div>
+  <div class="bg-glow glow-2"></div>
+  <div class="bg-glow glow-3"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-badges">
+        <span class="badge badge-pulse">🌐 Public Shared Itinerary</span>
+        <a href="/" class="btn-auth" style="text-decoration: none;">🏠 Create Your Own Trip</a>
+      </div>
+      <h1 class="main-title" id="share-title">🗺️ Shared Travel Itinerary</h1>
+      <p class="sub-title" id="share-subtitle">Curated by Autonomous AI Travel Agents</p>
+    </header>
+
+    <!-- Error Container (Hidden by default) -->
+    <section class="glass-card hidden" id="share-error-card" style="max-width: 600px; margin: 3rem auto; text-align: center; padding: 2.5rem 1.5rem;">
+      <div style="font-size: 3rem; margin-bottom: 1rem;">⚠️</div>
+      <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; color: #fff; margin-bottom: 0.75rem;">Trip Link Unavailable</h2>
+      <p id="share-error-text" style="color: #94a3b8; font-size: 0.95rem; line-height: 1.5; margin-bottom: 1.5rem;">
+        This shared trip link is invalid, incomplete, or may have expired.
+      </p>
+      <a href="/" class="btn-submit" style="text-decoration: none; display: inline-flex; justify-content: center; align-items: center; max-width: 280px; margin: 0 auto;">
+        <span>✨ Plan a New Trip</span>
+      </a>
+    </section>
+
+    <!-- Loading Spinner -->
+    <div id="share-loading" class="glass-card" style="max-width: 400px; margin: 4rem auto; text-align: center; padding: 2rem;">
+      <div class="spinner" style="margin: 0 auto 1rem auto; width: 36px; height: 36px;"></div>
+      <p style="color: #94a3b8;">Loading shared itinerary...</p>
+    </div>
+
+    <!-- Main Shared Results Container -->
+    <section class="glass-card results-card hidden" id="share-results-card" style="display: none;">
+      <!-- Destination Banner -->
+      <div class="dest-banner">
+        <div class="dest-info">
+          <span class="dest-country-badge" id="share-dest-country">DESTINATION</span>
+          <h2 class="dest-city" id="share-dest-city">City Name</h2>
+        </div>
+        <div class="dest-metrics">
+          <div class="metric-box">
+            <div class="metric-label">Duration</div>
+            <div class="metric-value" id="share-days-val">0 Days</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">Total Budget</div>
+            <div class="metric-value highlight" id="share-cost-val">₹0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Highlights Grid -->
+      <div class="highlights-grid">
+        <div class="highlight-card">
+          <div class="highlight-title">🍲 Recommended Dining & Delicacies</div>
+          <ul class="highlight-list" id="share-food-list"></ul>
+        </div>
+        <div class="highlight-card">
+          <div class="highlight-title">🚆 Local Transit Advice</div>
+          <div class="highlight-text" id="share-transit-text"></div>
+        </div>
+      </div>
+
+      <!-- Day-by-Day Exploration Schedule -->
+      <h3 class="section-heading">📅 Day-by-Day Exploration Schedule</h3>
+      <div class="days-timeline" id="share-days-timeline"></div>
+
+      <!-- Smart Packing Checklist -->
+      <div class="packing-section">
+        <h3 class="section-heading">🎒 Smart Packing Checklist</h3>
+        <div class="packing-grid" id="share-packing-grid"></div>
+      </div>
+
+      <!-- Footer Toolbar -->
+      <div class="toolbar" style="margin-top: 2rem;">
+        <button type="button" class="btn-secondary" id="btn-share-copy">
+          <span>🔗 Copy Link</span>
+        </button>
+        <button type="button" class="btn-secondary" id="btn-share-print">
+          <span>🖨️ Print / Save PDF</span>
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      const loadingEl = document.getElementById('share-loading');
+      const errorCard = document.getElementById('share-error-card');
+      const errorText = document.getElementById('share-error-text');
+      const resultsCard = document.getElementById('share-results-card');
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const jobId = urlParams.get('id');
+
+      if (!jobId) {
+        showError('No trip ID was provided in the share URL.');
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/trip/${jobId}/share`);
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          showError(data.detail || 'This shared trip link is invalid or the trip isn\'t ready yet.');
+          return;
+        }
+
+        const data = await res.json();
+        renderSharedItinerary(data);
+      } catch (err) {
+        showError('Network error while connecting to the server. Please try again.');
+      }
+
+      function showError(msg) {
+        loadingEl.classList.add('hidden');
+        loadingEl.style.display = 'none';
+        errorText.textContent = msg;
+        errorCard.classList.remove('hidden');
+      }
+
+      function renderSharedItinerary(itinerary) {
+        loadingEl.classList.add('hidden');
+        loadingEl.style.display = 'none';
+        resultsCard.style.display = 'block';
+        resultsCard.classList.remove('hidden');
+
+        const currency = itinerary.currency || 'INR';
+        const sym = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '₹';
+
+        function fmt(amt) {
+          return `${sym}${Math.round(amt || 0).toLocaleString()}`;
+        }
+
+        document.getElementById('share-dest-city').textContent = itinerary.destination_city || 'Shared Trip';
+        document.getElementById('share-dest-country').textContent = (itinerary.destination_country || 'INDIA').toUpperCase();
+        document.getElementById('share-days-val').textContent = `${itinerary.trip_length_days || 0} Days`;
+        document.getElementById('share-cost-val').textContent = fmt(itinerary.total_estimated_cost);
+
+        // Transit advice
+        const transitEl = document.getElementById('share-transit-text');
+        const transit = itinerary.local_transport_advice || [];
+        if (transit.length > 0) {
+          transitEl.innerHTML = transit.map(t => `<p style="margin-bottom:0.4rem;">🚆 ${escapeHtml(t)}</p>`).join('');
+        } else {
+          transitEl.innerHTML = '<p>🚆 Check local rail/bus connections or app-cabs for seamless transit.</p>';
+        }
+
+        // Food highlights
+        const foodEl = document.getElementById('share-food-list');
+        foodEl.innerHTML = '';
+        const foodItems = [];
+        (itinerary.days || []).forEach(d => {
+          const txt = [d.morning, d.afternoon, d.evening].filter(Boolean).join(' ');
+          const matches = txt.match(/(?:try|eat|dinner at|lunch at|snack on|delicacy|taste)\s+([^.,;]+)/gi);
+          if (matches) matches.forEach(m => foodItems.push(m.trim()));
+        });
+        if (foodItems.length > 0) {
+          foodItems.slice(0, 4).forEach(item => {
+            const li = document.createElement('li');
+            li.textContent = item.replace(/^(try|taste|eat)\s+/i, '');
+            foodEl.appendChild(li);
+          });
+        } else {
+          ['Local signature delicacies & street food', 'Neighborhood authentic dining spots'].forEach(f => {
+            const li = document.createElement('li');
+            li.textContent = f;
+            foodEl.appendChild(li);
+          });
+        }
+
+        // Timeline
+        const timelineEl = document.getElementById('share-days-timeline');
+        timelineEl.innerHTML = '';
+        (itinerary.days || []).forEach((day, idx) => {
+          const dayNum = day.day_number || idx + 1;
+          const theme = day.theme || `Day ${dayNum} Exploration`;
+          const costStr = fmt(day.estimated_cost);
+
+          const costItems = day.cost_breakdown || [];
+          let costBadgeHtml = `<span class="day-cost">${costStr}</span>`;
+          if (costItems.length > 0) {
+            let itemsHtml = costItems.map(item => `
+              <div class="cost-tooltip-item">
+                <span>${escapeHtml(item.item || '')}</span>
+                <strong>${fmt(item.amount)}</strong>
+              </div>
+            `).join('');
+            costBadgeHtml = `
+              <div class="day-cost-wrapper">
+                <span class="day-cost day-cost-interactive">${costStr} ⓘ</span>
+                <div class="cost-tooltip">
+                  <div class="cost-tooltip-title">Day ${dayNum} Expense Breakdown</div>
+                  ${itemsHtml}
+                </div>
+              </div>
+            `;
+          }
+
+          const card = document.createElement('div');
+          card.className = 'day-card';
+          card.innerHTML = `
+            <div class="day-card-header">
+              <div class="day-title-group">
+                <span class="day-badge">Day ${dayNum}</span>
+                <h4 class="day-theme">${escapeHtml(theme)}</h4>
+              </div>
+              <div class="day-meta">${costBadgeHtml}</div>
+            </div>
+            <div class="day-body">
+              ${day.morning ? `<div class="time-block"><span class="time-tag morning">🌅 Morning</span><p class="activity-desc">${escapeHtml(day.morning)}</p></div>` : ''}
+              ${day.afternoon ? `<div class="time-block"><span class="time-tag afternoon">☀️ Afternoon</span><p class="activity-desc">${escapeHtml(day.afternoon)}</p></div>` : ''}
+              ${day.evening ? `<div class="time-block"><span class="time-tag evening">🌙 Evening</span><p class="activity-desc">${escapeHtml(day.evening)}</p></div>` : ''}
+            </div>
+          `;
+          timelineEl.appendChild(card);
+        });
+
+        // Packing
+        const packingEl = document.getElementById('share-packing-grid');
+        packingEl.innerHTML = '';
+        (itinerary.packing_suggestions || []).forEach((item, idx) => {
+          const itemEl = document.createElement('label');
+          itemEl.className = 'checklist-item';
+          itemEl.innerHTML = `
+            <input type="checkbox" id="pack-${idx}">
+            <span class="checklist-text">${escapeHtml(item)}</span>
+          `;
+          itemEl.querySelector('input').addEventListener('change', (e) => {
+            itemEl.classList.toggle('done', e.target.checked);
+          });
+          packingEl.appendChild(itemEl);
+        });
+
+        // Mobile tap listener for tooltips
+        document.addEventListener('click', (e) => {
+          const wrapper = e.target.closest('.day-cost-wrapper');
+          if (wrapper) {
+            const isAlreadyActive = wrapper.classList.contains('active');
+            document.querySelectorAll('.day-cost-wrapper.active').forEach(w => w.classList.remove('active'));
+            if (!isAlreadyActive) wrapper.classList.add('active');
+          } else {
+            document.querySelectorAll('.day-cost-wrapper.active').forEach(w => w.classList.remove('active'));
+          }
+        });
+
+        document.getElementById('btn-share-copy').addEventListener('click', () => {
+          navigator.clipboard.writeText(window.location.href)
+            .then(() => showToast('🔗 Shareable trip link copied!'))
+            .catch(() => showToast('Failed to copy link', 'error'));
+        });
+
+        document.getElementById('btn-share-print').addEventListener('click', () => {
+          window.print();
+        });
+      }
+
+      function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function showToast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(() => toast.remove(), 3500);
+      }
+    });
+  </script>
+</body>
+</html>
