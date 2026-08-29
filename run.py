@@ -27,6 +27,12 @@ def open_browser():
     webbrowser.open(url)
 
 def main():
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
     root_dir = os.path.dirname(os.path.abspath(__file__))
     src_dir = os.path.join(root_dir, "backend", "src")
     if src_dir not in sys.path:
