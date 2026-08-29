@@ -10,7 +10,6 @@ of silently propagating a malformed string three stages later.
 """
 
 import time
-from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -86,6 +85,11 @@ class CityGuide(BaseModel):
     )
 
 
+class CostItem(BaseModel):
+    item: str = Field(..., description="Description of the line-item expense (e.g. 'Flight ticket', 'Entry fee')")
+    amount: float = Field(..., description="Expense amount in chosen currency")
+
+
 class ItineraryDay(BaseModel):
     day_number: int
     theme: str = Field(..., description="Short theme for the day, e.g. 'Old Town & Temples'")
@@ -94,6 +98,10 @@ class ItineraryDay(BaseModel):
     evening: str
     estimated_cost: float = Field(
         ..., description="Estimated cost for this day in the chosen currency"
+    )
+    cost_breakdown: list[CostItem] = Field(
+        default_factory=list,
+        description="Itemized breakdown of expenses for this day summing to estimated_cost",
     )
 
 
@@ -117,8 +125,13 @@ class TripItinerary(BaseModel):
 
     @model_validator(mode="after")
     def reconcile_total_estimated_cost(self) -> "TripItinerary":
-        """Ensure total_estimated_cost strictly matches the arithmetic sum of daily costs."""
+        """Ensure daily cost_breakdown sums to day.estimated_cost and total_estimated_cost strictly matches daily sum."""
         if self.days:
+            for day in self.days:
+                if day.cost_breakdown:
+                    sub_total = round(sum(item.amount for item in day.cost_breakdown), 2)
+                    if sub_total > 0:
+                        day.estimated_cost = sub_total
             computed_sum = round(sum(day.estimated_cost for day in self.days), 2)
             if computed_sum > 0:
                 self.total_estimated_cost = computed_sum

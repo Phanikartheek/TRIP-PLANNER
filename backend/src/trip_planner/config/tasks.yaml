@@ -35,6 +35,7 @@ plan_itinerary_task:
     Each day must have a theme, and a morning/afternoon/evening plan.
     Ground activity choices in the attractions and food already researched.
     ALWAYS specify real, famous, iconic spots by name (e.g., exact well-known restaurants with must-try signature dishes, trending cafes, popular shopping malls/cinemas, and scenic landmarks) rather than generic descriptions.
+    For EACH day, provide an itemized line-item expense breakdown in cost_breakdown (e.g. [{"item": "Cab fare to temple", "amount": 400}, {"item": "Lunch at Babai Hotel", "amount": 350}]) that sums to that day's estimated_cost.
     Estimate per-day costs (estimated_cost) and total trip cost (total_estimated_cost)
     strictly in the traveler's budget currency, staying within the overall budget of {budget}.
     Ensure the total_estimated_cost is exactly equal to the arithmetic sum of the individual
@@ -49,7 +50,7 @@ plan_itinerary_task:
     - CRITICAL PLACE NAME RULE: Keep all specific place names, restaurant names, hotel names, street names, and landmark names (e.g., "Kanaka Durga Temple", "Babai Hotel", "Besant Road", "Prakasam Barrage") in English/Roman script across all output languages so they remain clear, searchable, and useful for navigation on maps.
   expected_output: >-
     A complete itinerary covering every day of the trip in the requested output language ({language}), with currency, total
-    estimated cost matching the sum of daily estimated costs, daily breakdowns,
+    estimated cost matching the sum of daily estimated costs, daily breakdowns with itemized cost_breakdown lists,
     transit advice, and a packing list matching the schema.
   agent: travel_concierge
   context:
