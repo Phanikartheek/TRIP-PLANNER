@@ -94,6 +94,10 @@ document.addEventListener('DOMContentLoaded', () => {
   checkBackendHealth();
   setInterval(checkBackendHealth, 15000);
 
+  // Ensure results and tracker sections are hidden on clean load
+  if (resultsSection) resultsSection.classList.remove('active');
+  if (trackerSection) trackerSection.classList.remove('active');
+
   // State Management
   let currentMode = 'domestic'; // 'domestic' | 'international'
   let currentCurrency = 'INR'; // 'INR' | 'USD' | 'EUR'
