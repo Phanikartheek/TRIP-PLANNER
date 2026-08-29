@@ -26,6 +26,9 @@
           <span class="status-dot" id="status-dot"></span>
           <span id="status-text">Connecting to Backend...</span>
         </div>
+        <div class="auth-status-badge" id="auth-header-widget">
+          <button type="button" class="btn-auth" id="btn-login-modal">🔑 Login / Sign In</button>
+        </div>
       </div>
       <h1 class="main-title">Craft Your Dream Itinerary</h1>
       <p class="sub-title">
@@ -400,6 +403,9 @@
 
       <!-- Export Toolbar -->
       <div class="toolbar">
+        <button type="button" class="btn-secondary" id="btn-download-pdf">
+          <span>📄 Download PDF</span>
+        </button>
         <button type="button" class="btn-secondary" id="btn-copy-json">
           <span>📋 Copy JSON</span>
         </button>
@@ -413,6 +419,25 @@
 
     </section>
 
+  </div>
+
+  <!-- Login Modal -->
+  <div class="modal-overlay hidden" id="login-modal">
+    <div class="modal-content glass-card">
+      <button type="button" class="modal-close" id="modal-close-btn">&times;</button>
+      <h3 style="font-family: 'Outfit', sans-serif; font-size: 1.35rem; margin-bottom: 0.5rem; color: #fff;">🔑 Sign In with Magic Link</h3>
+      <p class="modal-desc" style="color: #94a3b8; font-size: 0.9rem; margin-bottom: 1.25rem;">Enter your email to receive a secure passwordless login link.</p>
+      <form id="login-form">
+        <div class="input-wrapper" style="margin-bottom: 1rem;">
+          <span class="input-icon">✉️</span>
+          <input type="email" id="login-email-input" class="form-input" placeholder="you@example.com" required>
+        </div>
+        <button type="submit" class="btn-submit" id="send-magic-link-btn">
+          <span>✨ Send Magic Login Link</span>
+        </button>
+      </form>
+      <div id="login-msg" class="login-msg hidden" style="margin-top: 1rem; font-size: 0.85rem;"></div>
+    </div>
   </div>
 
   <!-- Toast Notification Container -->

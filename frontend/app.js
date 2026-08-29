@@ -856,6 +856,31 @@ document.addEventListener('DOMContentLoaded', () => {
         ? formatMoney(day.estimated_cost, activeCurrency)
         : '';
 
+      // Render cost badge with tooltip if cost_breakdown exists
+      const costItems = day.cost_breakdown || [];
+      let costTagHtml = '';
+      if (cost) {
+        if (costItems.length > 0) {
+          const breakdownHtml = costItems.map(item => `
+            <div class="cost-tooltip-item">
+              <span>${escapeHtml(item.item || item.name || 'Expense')}</span>
+              <strong>${formatMoney(item.amount || 0, activeCurrency)}</strong>
+            </div>
+          `).join('');
+          costTagHtml = `
+            <div class="day-cost-wrapper">
+              <span class="day-cost-tag" style="cursor:pointer;" title="Hover/tap for expense details">${cost} ℹ️</span>
+              <div class="cost-tooltip">
+                <div class="cost-tooltip-title">Day ${dayNum} Cost Breakdown</div>
+                ${breakdownHtml}
+              </div>
+            </div>
+          `;
+        } else {
+          costTagHtml = `<span class="day-cost-tag">${cost}</span>`;
+        }
+      }
+
       const dayCard = document.createElement('div');
       dayCard.className = `day-card ${idx === 0 ? 'open' : ''}`;
       dayCard.innerHTML = `
@@ -865,7 +890,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <span class="day-theme-text">${escapeHtml(theme)}</span>
           </div>
           <div class="day-meta">
-            ${cost ? `<span class="day-cost-tag">${cost}</span>` : ''}
+            ${costTagHtml}
             <span class="chevron-icon">▼</span>
           </div>
         </div>
@@ -995,7 +1020,100 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/'/g, '&#039;');
   }
 
-  // Initial Presets Render
+  // --- PDF Export Handler ---
+  const btnDownloadPdf = document.getElementById('btn-download-pdf');
+  if (btnDownloadPdf) {
+    btnDownloadPdf.addEventListener('click', () => {
+      if (!currentJobId) {
+        showToast('⚠️ No active trip itinerary found to export.');
+        return;
+      }
+      window.open(`/api/trip/${currentJobId}/pdf`, '_blank');
+      showToast('📄 Downloading printable PDF...');
+    });
+  }
+
+  // --- Auth & Magic Link Modal Handlers ---
+  const authHeaderWidget = document.getElementById('auth-header-widget');
+  const loginModal = document.getElementById('login-modal');
+  const loginForm = document.getElementById('login-form');
+  const loginEmailInput = document.getElementById('login-email-input');
+  const modalCloseBtn = document.getElementById('modal-close-btn');
+  const loginMsg = document.getElementById('login-msg');
+
+  async function checkAuth() {
+    try {
+      const res = await fetch('/api/auth/me');
+      if (res.ok) {
+        const data = await res.json();
+        if (authHeaderWidget) {
+          authHeaderWidget.innerHTML = `
+            <a href="/my-trips" class="user-badge" style="text-decoration:none;">👤 ${escapeHtml(data.email)} (My Trips)</a>
+            <button type="button" class="btn-auth" id="btn-logout" style="background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.2);color:#94a3b8;">Logout</button>
+          `;
+          document.getElementById('btn-logout').addEventListener('click', async () => {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            window.location.reload();
+          });
+        }
+      } else {
+        if (authHeaderWidget) {
+          authHeaderWidget.innerHTML = `<button type="button" class="btn-auth" id="btn-login-modal">🔑 Login / Sign In</button>`;
+          document.getElementById('btn-login-modal').addEventListener('click', () => {
+            if (loginModal) loginModal.classList.remove('hidden');
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Auth check error:', e);
+    }
+  }
+
+  if (modalCloseBtn && loginModal) {
+    modalCloseBtn.addEventListener('click', () => loginModal.classList.add('hidden'));
+  }
+
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = loginEmailInput.value.trim();
+      if (!email) return;
+
+      const submitBtn = document.getElementById('send-magic-link-btn');
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = `<span>Sending...</span>`;
+
+      try {
+        const res = await fetch('/api/auth/request-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          loginMsg.className = 'login-msg';
+          loginMsg.style.color = '#4ade80';
+          loginMsg.textContent = data.message;
+          loginMsg.classList.remove('hidden');
+          showToast('📧 Magic login link dispatched!');
+        } else {
+          loginMsg.className = 'login-msg';
+          loginMsg.style.color = '#f87171';
+          loginMsg.textContent = data.error || data.detail || 'Failed to send login link.';
+          loginMsg.classList.remove('hidden');
+        }
+      } catch (err) {
+        console.error(err);
+        showToast('❌ Error sending magic link');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = `<span>✨ Send Magic Login Link</span>`;
+      }
+    });
+  }
+
+  // Initial Presets & Auth Check Render
   renderPresets();
   updateBudgetDisplay();
+  checkAuth();
 });
