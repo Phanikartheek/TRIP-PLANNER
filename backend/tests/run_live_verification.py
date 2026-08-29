@@ -7,9 +7,9 @@ across 375px, 390px, 414px, and 768px viewports for Form, Itinerary, Login Modal
 import json
 import os
 import shutil
+
 from fastapi.testclient import TestClient
 from playwright.sync_api import sync_playwright
-
 from trip_planner.api import db
 from trip_planner.api.app import app
 
@@ -128,7 +128,9 @@ def run_verification():
         browser = p.chromium.launch(headless=True, channel="msedge")
 
         for vp in VIEWPORTS:
-            w, h, vp_name = vp["width"], vp["height"], vp["name"]
+            w = int(vp["width"])
+            h = int(vp["height"])
+            vp_name = str(vp["name"])
             print(f"\n==================== Testing Viewport: {vp_name} ({w}x{h}) ====================")
 
             # --- A. FORM VIEW METRICS ---

@@ -33,6 +33,7 @@ def test_db_create_get_update_roundtrip(tmp_path: Path):
     # 3. Update job to running
     db.update_job("test-job-1", status="running", db_path=db_file)
     fetched = db.get_job("test-job-1", db_path=db_file)
+    assert fetched is not None
     assert fetched["status"] == "running"
 
     # 4. Update job to complete with result and QA history
@@ -47,6 +48,7 @@ def test_db_create_get_update_roundtrip(tmp_path: Path):
     )
 
     fetched = db.get_job("test-job-1", db_path=db_file)
+    assert fetched is not None
     assert fetched["status"] == "complete"
     assert fetched["result"] == sample_result
     assert fetched["qa_history"] == sample_history
@@ -68,11 +70,12 @@ def test_db_startup_reconciliation_marks_interrupted_jobs_failed(tmp_path: Path)
     dead_job = db.get_job("dead-job", db_path=db_file)
     pending_job = db.get_job("pending-job", db_path=db_file)
 
+    assert done_job is not None and dead_job is not None and pending_job is not None
     assert done_job["status"] == "complete"
     assert dead_job["status"] == "failed"
-    assert "interrupted by a server restart" in dead_job["error"]
+    assert dead_job["error"] is not None and "interrupted by a server restart" in dead_job["error"]
     assert pending_job["status"] == "failed"
-    assert "interrupted by a server restart" in pending_job["error"]
+    assert pending_job["error"] is not None and "interrupted by a server restart" in pending_job["error"]
 
 
 def test_db_get_root_job_traversal(tmp_path: Path):
@@ -101,7 +104,7 @@ def test_rate_limiter_wired_to_endpoints():
 
     # Test that rate limiter is wired on plan-trip
     # (Checking endpoint route metadata has limiter registered)
-    routes = {route.path: route for route in app.routes}
+    routes = {getattr(route, "path", None): route for route in app.routes if hasattr(route, "path")}
     assert "/api/plan-trip" in routes
     assert "/api/revise-trip" in routes
     assert "/api/ask-question" in routes
