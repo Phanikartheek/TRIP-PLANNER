@@ -47,7 +47,7 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: 'Inter', 'Nirmala UI', 'Gautami', 'Mangal', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
   background-color: var(--bg-dark);
   color: var(--text-main);
   line-height: 1.6;
@@ -61,7 +61,7 @@ body {
 }
 
 h1, h2, h3, h4, .brand-font {
-  font-family: 'Outfit', sans-serif;
+  font-family: 'Outfit', 'Nirmala UI', 'Gautami', 'Mangal', sans-serif;
   letter-spacing: -0.02em;
 }
 

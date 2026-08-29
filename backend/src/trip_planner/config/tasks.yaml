@@ -40,8 +40,15 @@ plan_itinerary_task:
     Ensure the total_estimated_cost is exactly equal to the arithmetic sum of the individual
     estimated_cost values across all days. Provide a practical packing list
     appropriate for the destination and season, and key transit advice.
+
+    LANGUAGE & PLACE NAME INSTRUCTIONS:
+    The requested target output language is: "{language}".
+    - If "{language}" is "te" (Telugu), write all free-text user-facing descriptions (day theme, morning, afternoon, evening, packing_suggestions, local_transport_advice) in natural Telugu script (తెలుగు).
+    - If "{language}" is "hi" (Hindi), write all free-text user-facing descriptions in natural Hindi/Devanagari script (हिंदी).
+    - If "{language}" is "en" or unspecified, write in standard English.
+    - CRITICAL PLACE NAME RULE: Keep all specific place names, restaurant names, hotel names, street names, and landmark names (e.g., "Kanaka Durga Temple", "Babai Hotel", "Besant Road", "Prakasam Barrage") in English/Roman script across all output languages so they remain clear, searchable, and useful for navigation on maps.
   expected_output: >-
-    A complete itinerary covering every day of the trip, with currency, total
+    A complete itinerary covering every day of the trip in the requested output language ({language}), with currency, total
     estimated cost matching the sum of daily estimated costs, daily breakdowns,
     transit advice, and a packing list matching the schema.
   agent: travel_concierge
@@ -63,8 +70,15 @@ revise_itinerary_task:
     3. Preserve all other existing days, themes, activities, attractions, and costs that were NOT affected by the feedback.
     4. If any day's activities or costs change, re-estimate that day's cost (estimated_cost) and ensure total_estimated_cost is updated to exactly equal the sum of all day costs.
     5. Keep the packing suggestions, destination, currency, and transit advice intact or adjust them if specifically affected by the feedback.
+
+    LANGUAGE & PLACE NAME INSTRUCTIONS:
+    The requested target output language is: "{language}".
+    - If "{language}" is "te" (Telugu), write all free-text descriptions in natural Telugu script (తెలుగు).
+    - If "{language}" is "hi" (Hindi), write all free-text descriptions in natural Hindi script (हिंदी).
+    - If "{language}" is "en" or unspecified, write in standard English.
+    - CRITICAL PLACE NAME RULE: Keep all specific place names, restaurant names, landmark names, and street names in English/Roman script.
   expected_output: >-
-    A complete revised TripItinerary model reflecting the user's requested changes with specific named places and restaurants while preserving the rest of the original itinerary.
+    A complete revised TripItinerary model reflecting the user's requested changes in the target language ({language}) with specific named places and restaurants while preserving the rest of the original itinerary.
   agent: travel_concierge
 
 answer_destination_question_task:
@@ -84,9 +98,16 @@ answer_destination_question_task:
        - grounded_claims: List specific named places, establishments, or facts directly verified by tool search results.
        - ungrounded_claims: List any general advice, assertions, or statements not backed by a specific search result. If everything in the answer is verified by search results, return an empty list ([]).
     6. Provide a direct, helpful, and concise answer (3-6 sentences).
+
+    LANGUAGE & PLACE NAME INSTRUCTIONS:
+    The requested target output language is: "{language}".
+    - If "{language}" is "te" (Telugu), write the answer text in natural Telugu script (తెలుగు).
+    - If "{language}" is "hi" (Hindi), write the answer text in natural Hindi script (हिंदी).
+    - If "{language}" is "en" or unspecified, write in standard English.
+    - CRITICAL PLACE NAME RULE: Keep all specific establishment names, restaurant names, and landmark names in English/Roman script.
   expected_output: >-
     A structured QAResponse JSON containing:
-    - answer: direct 3-6 sentence response naming specific real-world places in {destination_city}.
+    - answer: direct 3-6 sentence response in the target language ({language}) naming specific real-world places in {destination_city}.
     - grounded_claims: list of specific named places/facts directly verified by tool search results.
     - ungrounded_claims: list of statements based on general knowledge without search result backing (empty list if all grounded).
   agent: local_qa_expert

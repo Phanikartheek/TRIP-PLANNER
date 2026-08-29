@@ -10,8 +10,38 @@ of silently propagating a malformed string three stages later.
 """
 
 import time
+from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+SUPPORTED_LANGUAGES = {"en", "te", "hi"}
+
+
+def _validate_language_code(v: str) -> str:
+    code = v.strip().lower()
+    if code not in SUPPORTED_LANGUAGES:
+        raise ValueError(
+            f"Unsupported language code '{v}'. Supported languages are: 'en' (English), 'te' (Telugu), 'hi' (Hindi)."
+        )
+    return code
+
+
+class TripPlanRequest(BaseModel):
+    """Payload for submitting a trip-planning request."""
+
+    origin: str = Field(..., description="Origin city / transport hub")
+    cities: str = Field(..., description="Comma-separated candidate cities to evaluate")
+    interests: str = Field(..., description="User travel interests, hobbies, or vibes")
+    trip_length: int = Field(default=5, ge=1, le=30, description="Duration of trip in days")
+    budget: float = Field(default=25000.0, gt=0, description="Budget in chosen currency")
+    currency: str = Field(default="INR", description="Budget currency code")
+    travel_mode: str | None = Field(default="domestic", description="Travel mode (domestic vs international)")
+    language: str = Field(default="en", description="Output language code: 'en', 'te', or 'hi'")
+
+    @field_validator("language")
+    @classmethod
+    def validate_lang(cls, v: str) -> str:
+        return _validate_language_code(v)
 
 
 class CitySelection(BaseModel):
@@ -104,6 +134,13 @@ class RevisionRequest(BaseModel):
     feedback: str = Field(
         ..., description="User follow-up feedback, e.g. 'make day 2 cheaper' or 'replace trekking with beach time'"
     )
+    language: str = Field(default="en", description="Output language code: 'en', 'te', or 'hi'")
+
+    @field_validator("language")
+    @classmethod
+    def validate_lang(cls, v: str) -> str:
+        return _validate_language_code(v)
+
 
 class QAExchange(BaseModel):
     """Represents a single conversational turn in the destination Q&A thread."""
@@ -155,8 +192,13 @@ class DestinationQuestion(BaseModel):
         default=None,
         description="Optional prior conversational exchanges in the same session",
     )
+    language: str = Field(default="en", description="Output language code: 'en', 'te', or 'hi'")
+
+    @field_validator("language")
+    @classmethod
+    def validate_lang(cls, v: str) -> str:
+        return _validate_language_code(v)
 
 
 # Alias QuestionAnswer to QAResponse for backward compatibility
 QuestionAnswer = QAResponse
-

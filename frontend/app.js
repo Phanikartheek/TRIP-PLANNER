@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const budgetBadge = document.getElementById('budget-val');
   const budgetCurrencySymbol = document.getElementById('budget-currency-symbol');
   const travelStyleSelect = document.getElementById('travel-style-select');
+  const languageSelect = document.getElementById('language-select');
 
   // Mode Buttons
   const modeDomesticBtn = document.getElementById('mode-domestic');
@@ -420,6 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
       travel_mode: currentMode,
       food_preference: getSelectedFood(),
       travel_style: travelStyleSelect.value,
+      language: languageSelect ? languageSelect.value : 'en',
     };
 
     if (!payload.origin || !payload.cities || !payload.interests) {
@@ -532,7 +534,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const response = await fetch(`${API_BASE}/api/revise-trip`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ job_id: currentJobId, feedback }),
+          body: JSON.stringify({
+            job_id: currentJobId,
+            feedback,
+            language: languageSelect ? languageSelect.value : 'en'
+          }),
         });
 
         if (!response.ok) {
@@ -614,7 +620,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const response = await fetch(`${API_BASE}/api/ask-question`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ job_id: currentJobId, question }),
+          body: JSON.stringify({
+            job_id: currentJobId,
+            question,
+            language: languageSelect ? languageSelect.value : 'en'
+          }),
         });
 
         if (!response.ok) {

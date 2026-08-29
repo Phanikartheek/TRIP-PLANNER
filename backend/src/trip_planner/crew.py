@@ -54,10 +54,12 @@ litellm.completion = _safe_litellm_completion
 _original_llm_call = LLM.call
 
 def _parse_retry_after(err_msg: str) -> float | None:
-    match = re.search(r"try again in (?:(\d+)m)?([\d\.]+)s", err_msg, re.IGNORECASE)
+    match = re.search(r"try again in (?:(\d+)m)?([\d\.]+)(ms|s)", err_msg, re.IGNORECASE)
     if match:
         minutes = float(match.group(1)) if match.group(1) else 0.0
-        seconds = float(match.group(2))
+        val = float(match.group(2))
+        unit = match.group(3).lower()
+        seconds = (val / 1000.0) if unit == "ms" else val
         return (minutes * 60.0) + seconds + 2.0
     return None
 

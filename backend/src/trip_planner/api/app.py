@@ -24,7 +24,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from trip_planner.api import db
-from trip_planner.schemas.models import DestinationQuestion, QAResponse, RevisionRequest
+from trip_planner.schemas.models import DestinationQuestion, QAResponse, RevisionRequest, TripPlanRequest
 
 load_dotenv()
 
@@ -93,14 +93,6 @@ async def serve_app_js():
     raise HTTPException(status_code=404, detail="app.js not found")
 
 
-class TripPlanRequest(BaseModel):
-    origin: str = Field(..., description="Origin city / transport hub")
-    cities: str = Field(..., description="Comma-separated candidate cities to evaluate")
-    interests: str = Field(..., description="User travel interests, hobbies, or vibes")
-    trip_length: int = Field(default=5, ge=1, le=30, description="Duration of trip in days")
-    budget: float = Field(default=25000.0, gt=0, description="Budget in chosen currency")
-    currency: str = Field(default="INR", description="Budget currency code")
-    travel_mode: str | None = Field(default="domestic", description="Travel mode (domestic vs international)")
 
 
 class JobStatusResponse(BaseModel):
@@ -313,6 +305,7 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
         "trip_length": str(payload.trip_length),
         "budget": f"₹{payload.budget:,.0f} {payload.currency}" if payload.currency == "INR" else f"{payload.currency} {payload.budget:,.0f}",
         "currency": payload.currency,
+        "language": payload.language,
     }
 
     job_id = str(uuid.uuid4())
@@ -357,6 +350,7 @@ async def revise_trip_endpoint(request: Request, payload: RevisionRequest):
     revision_inputs = {
         "itinerary": itinerary_str,
         "feedback": payload.feedback.strip(),
+        "language": payload.language,
     }
 
     new_job_id = str(uuid.uuid4())
@@ -427,6 +421,7 @@ async def ask_question_endpoint(request: Request, payload: DestinationQuestion):
         "destination_city": str(destination_city),
         "question": payload.question.strip(),
         "conversation_history": conversation_history_str,
+        "language": payload.language,
     }
 
     new_job_id = str(uuid.uuid4())
