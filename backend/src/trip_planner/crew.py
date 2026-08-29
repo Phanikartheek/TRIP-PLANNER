@@ -85,7 +85,7 @@ def _resilient_llm_call(self, *args, **kwargs):
     max_retries = 8
     for attempt in range(max_retries):
         try:
-            return _original_llm_call(self, *clean_args, **kwargs)
+            return _original_llm_call(self, *clean_args, **kwargs)  # type: ignore[call-arg]
         except Exception as e:
             err_msg = str(e)
             if ("rate_limit" in err_msg.lower() or "429" in err_msg) and attempt < max_retries - 1:
@@ -97,7 +97,7 @@ def _resilient_llm_call(self, *args, **kwargs):
                 kwargs_copy = dict(kwargs)
                 kwargs_copy.pop("tools", None)
                 kwargs_copy.pop("tool_choice", None)
-                return _original_llm_call(self, *clean_args, **kwargs_copy)
+                return _original_llm_call(self, *clean_args, **kwargs_copy)  # type: ignore[call-arg]
             raise
 
 LLM.call = _resilient_llm_call
@@ -118,8 +118,8 @@ def _default_llm() -> LLM:
 class TripPlannerCrew:
     """Sequential crew: city_selector -> local_expert -> travel_concierge."""
 
-    agents_config = "config/agents.yaml"
-    tasks_config = "config/tasks.yaml"
+    agents_config: Any = "config/agents.yaml"
+    tasks_config: Any = "config/tasks.yaml"
 
     def __init__(self) -> None:
         self.llm = _default_llm()
@@ -129,7 +129,7 @@ class TripPlannerCrew:
     @agent
     def city_selector(self) -> Agent:
         return Agent(
-            config=self.agents_config["city_selector"],
+            config=self.agents_config["city_selector"],  # type: ignore[call-arg]
             tools=[self.search_tool],
             llm=self.llm,
             max_iter=5,
@@ -138,7 +138,7 @@ class TripPlannerCrew:
     @agent
     def local_expert(self) -> Agent:
         return Agent(
-            config=self.agents_config["local_expert"],
+            config=self.agents_config["local_expert"],  # type: ignore[call-arg]
             tools=[self.search_tool, self.scrape_tool],
             llm=self.llm,
             max_iter=5,
@@ -147,7 +147,7 @@ class TripPlannerCrew:
     @agent
     def travel_concierge(self) -> Agent:
         return Agent(
-            config=self.agents_config["travel_concierge"],
+            config=self.agents_config["travel_concierge"],  # type: ignore[call-arg]
             tools=[self.search_tool],
             llm=self.llm,
             max_iter=5,
@@ -156,7 +156,7 @@ class TripPlannerCrew:
     @agent
     def local_qa_expert(self) -> Agent:
         return Agent(
-            config=self.agents_config["local_qa_expert"],
+            config=self.agents_config["local_qa_expert"],  # type: ignore[call-arg]
             tools=[self.search_tool, self.scrape_tool],
             llm=self.llm,
             max_iter=10,
@@ -165,7 +165,7 @@ class TripPlannerCrew:
     @task
     def select_city_task(self) -> Task:
         return Task(
-            config=self.tasks_config["select_city_task"],
+            config=self.tasks_config["select_city_task"],  # type: ignore[call-arg]
             agent=self.city_selector(),
             output_pydantic=CitySelection,
         )
@@ -173,7 +173,7 @@ class TripPlannerCrew:
     @task
     def gather_city_info_task(self) -> Task:
         return Task(
-            config=self.tasks_config["gather_city_info_task"],
+            config=self.tasks_config["gather_city_info_task"],  # type: ignore[call-arg]
             agent=self.local_expert(),
             output_pydantic=CityGuide,
         )
@@ -181,7 +181,7 @@ class TripPlannerCrew:
     @task
     def plan_itinerary_task(self) -> Task:
         return Task(
-            config=self.tasks_config["plan_itinerary_task"],
+            config=self.tasks_config["plan_itinerary_task"],  # type: ignore[call-arg]
             agent=self.travel_concierge(),
             output_pydantic=TripItinerary,
         )
@@ -189,7 +189,7 @@ class TripPlannerCrew:
     @task
     def revise_itinerary_task(self) -> Task:
         return Task(
-            config=self.tasks_config["revise_itinerary_task"],
+            config=self.tasks_config["revise_itinerary_task"],  # type: ignore[call-arg]
             agent=self.travel_concierge(),
             output_pydantic=TripItinerary,
         )
@@ -197,7 +197,7 @@ class TripPlannerCrew:
     @task
     def answer_destination_question_task(self) -> Task:
         return Task(
-            config=self.tasks_config["answer_destination_question_task"],
+            config=self.tasks_config["answer_destination_question_task"],  # type: ignore[call-arg]
             agent=self.local_qa_expert(),
             output_pydantic=QAResponse,
         )
@@ -218,7 +218,7 @@ class TripPlannerCrew:
         """
         agent_instance = self.travel_concierge()
         task_instance = Task(
-            config=self.tasks_config["revise_itinerary_task"],
+            config=self.tasks_config["revise_itinerary_task"],  # type: ignore[call-arg]
             agent=agent_instance,
             output_pydantic=TripItinerary,
         )
@@ -236,7 +236,7 @@ class TripPlannerCrew:
         """
         agent_instance = self.local_qa_expert()
         task_instance = Task(
-            config=self.tasks_config["answer_destination_question_task"],
+            config=self.tasks_config["answer_destination_question_task"],  # type: ignore[call-arg]
             agent=agent_instance,
             output_pydantic=QAResponse,
         )
@@ -246,3 +246,4 @@ class TripPlannerCrew:
             process=Process.sequential,
             verbose=True,
         )
+
