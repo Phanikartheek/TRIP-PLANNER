@@ -8,8 +8,9 @@ import os
 import sys
 import threading
 import time
-import webbrowser
 import urllib.request
+import webbrowser
+
 
 def open_browser():
     """Wait for server to become responsive, then open browser."""

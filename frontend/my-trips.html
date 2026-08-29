@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Saved Trips — AI Trip Planner</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Gautami&family=Nirmala+UI&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background-globes">
+        <div class="globe globe-1"></div>
+        <div class="globe globe-2"></div>
+    </div>
+
+    <header class="app-header">
+        <div class="header-container">
+            <a href="/" class="logo-group">
+                <span class="logo-icon">✈️</span>
+                <div class="logo-text">
+                    <h1>AI Trip Planner</h1>
+                    <span class="badge">My Trips</span>
+                </div>
+            </a>
+            <div class="header-nav">
+                <a href="/" class="btn secondary">Back to Planner</a>
+                <div id="auth-widget">
+                    <span id="user-email-display" class="user-badge">Loading...</span>
+                    <button id="logout-btn" class="btn outline small">Logout</button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-container">
+        <section class="card glass my-trips-section">
+            <div class="section-header">
+                <h2>Saved Itineraries</h2>
+                <p>All completed trip plans associated with your account.</p>
+            </div>
+            
+            <div id="trips-loading" class="loading-state">
+                <div class="spinner"></div>
+                <p>Loading your saved trips...</p>
+            </div>
+
+            <div id="trips-empty" class="empty-state hidden">
+                <div class="empty-icon">🗺️</div>
+                <h3>No saved trips found</h3>
+                <p>Plan a trip while logged in to automatically save it here.</p>
+                <a href="/" class="btn primary">Plan a Trip Now</a>
+            </div>
+
+            <div id="trips-grid" class="trips-grid hidden"></div>
+        </section>
+    </main>
+
+    <script>
+        async function loadMyTrips() {
+            try {
+                const res = await fetch('/api/auth/me');
+                if (!res.ok) {
+                    window.location.href = '/?auth_error=login_required';
+                    return;
+                }
+                const data = await res.json();
+                document.getElementById('user-email-display').textContent = '👤 ' + data.email;
+
+                const tripsRes = await fetch('/api/my-trips');
+                const tripsData = await tripsRes.json();
+
+                document.getElementById('trips-loading').classList.add('hidden');
+                
+                if (!tripsData.trips || tripsData.trips.length === 0) {
+                    document.getElementById('trips-empty').classList.remove('hidden');
+                    return;
+                }
+
+                const grid = document.getElementById('trips-grid');
+                grid.classList.remove('hidden');
+                grid.innerHTML = tripsData.trips.map(trip => {
+                    const res = trip.result || {};
+                    const city = res.destination_city || 'Destination';
+                    const country = res.destination_country || 'India';
+                    const days = res.trip_length_days || 1;
+                    const cost = res.total_estimated_cost ? `${res.currency || 'INR'} ${res.total_estimated_cost.toLocaleString()}` : '';
+                    const dateStr = new Date(trip.created_at * 1000).toLocaleDateString(undefined, {
+                        year: 'numeric', month: 'short', day: 'numeric'
+                    });
+
+                    return `
+                        <div class="trip-card glass">
+                            <div class="trip-card-header">
+                                <h3>${city}, ${country}</h3>
+                                <span class="badge success">Completed</span>
+                            </div>
+                            <div class="trip-card-body">
+                                <p><strong>Duration:</strong> ${days} Day(s)</p>
+                                <p><strong>Budget:</strong> ${cost}</p>
+                                <p class="text-muted"><small>Planned on ${dateStr}</small></p>
+                            </div>
+                            <div class="trip-card-actions">
+                                <a href="/?job_id=${trip.job_id}" class="btn primary small">View Itinerary</a>
+                                <a href="/api/trip/${trip.job_id}/pdf" target="_blank" class="btn secondary small">PDF</a>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error(err);
+                document.getElementById('trips-loading').innerHTML = '<p class="error-msg">Failed to load trips. Please try refreshing.</p>';
+            }
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', async () => {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            window.location.href = '/';
+        });
+
+        loadMyTrips();
+    </script>
+</body>
+</html>

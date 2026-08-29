@@ -3,11 +3,10 @@ Unit tests for multilingual language validation in request schemas and API endpo
 """
 
 import pytest
-from pydantic import ValidationError
 from fastapi.testclient import TestClient
-
-from trip_planner.schemas.models import TripPlanRequest, DestinationQuestion, RevisionRequest
+from pydantic import ValidationError
 from trip_planner.api.app import app
+from trip_planner.schemas.models import DestinationQuestion, RevisionRequest, TripPlanRequest
 
 
 def test_schema_language_validation_supported():

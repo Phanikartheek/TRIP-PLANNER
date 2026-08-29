@@ -58,6 +58,14 @@ Your default browser will automatically open **[http://127.0.0.1:8000](http://12
 
 ---
 
+## 🔒 Security Notes
+
+- **Magic Link Local Console Fallback Guard**: When `RESEND_API_KEY` is not set in `.env`, magic login links are printed directly to the server console accompanied by a loud **WARNING log**. This fallback is strictly designed for offline local development and **MUST NEVER** be enabled or used in deployed public environments.
+- **Login Rate Limiting**: `POST /api/auth/request-login` is protected by IP-keyed rate limiting (`3 requests/hour`) to prevent magic link email harvesting, spam, and user harassment.
+- **Timing Attack Resistance & Token Storage**: Authentication tokens (`login_token` and `session_token`) are 256-bit cryptographically secure random values generated via `secrets.token_urlsafe(32)`. Token validation is executed via direct SQLite Primary Key lookup (`SELECT ... WHERE token = ?`), providing $O(1)$ constant-time database index query execution and avoiding Python string comparison timing side-channels.
+
+---
+
 ## 🏛️ Architecture
 
 ```
