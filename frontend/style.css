@@ -1795,4 +1795,185 @@ h1, h2, h3, h4, .brand-font {
   }
 }
 
+/* Recommended Accommodation Card */
+.stay-section-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  margin-top: 1.75rem;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.stay-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.stay-header-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.stay-header-title h3 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #fff;
+  font-family: 'Outfit', sans-serif;
+}
+
+.badge-stay-tier {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.3));
+  border: 1px solid rgba(139, 92, 246, 0.5);
+  color: #a7f3d0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.3rem 0.75rem;
+  border-radius: 20px;
+}
+
+.stay-card-body {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-md);
+  padding: 1.1rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.stay-main-info h4 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--primary);
+  margin-bottom: 0.4rem;
+}
+
+.stay-sub-details {
+  display: flex;
+  gap: 1.25rem;
+  font-size: 0.9rem;
+  color: #94a3b8;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.stay-price {
+  color: #34d399;
+  font-weight: 600;
+}
+
+.stay-why-text {
+  font-size: 0.92rem;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+/* Smart Budget Upgrade Insights Card */
+.upgrade-section-card {
+  background: linear-gradient(135deg, rgba(30, 27, 75, 0.75), rgba(15, 23, 42, 0.85));
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  border-radius: var(--radius-lg);
+  padding: 1.6rem;
+  margin-top: 1.75rem;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 6px 25px rgba(244, 63, 94, 0.12);
+}
+
+.upgrade-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.6rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.upgrade-header-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.upgrade-header-title h3 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #fff;
+  font-family: 'Outfit', sans-serif;
+}
+
+.badge-upgrade-amount {
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
+  color: #ffffff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0.35rem 0.85rem;
+  border-radius: 20px;
+  box-shadow: 0 2px 10px rgba(244, 63, 94, 0.4);
+}
+
+.upgrade-desc {
+  font-size: 0.9rem;
+  color: #94a3b8;
+  margin-bottom: 1.25rem;
+}
+
+.upgrade-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.upgrade-item-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  padding: 1.1rem;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.upgrade-item-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(244, 63, 94, 0.4);
+}
+
+.upgrade-item-label {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #f43f5e;
+  margin-bottom: 0.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.upgrade-item-card p {
+  font-size: 0.9rem;
+  color: #e2e8f0;
+  line-height: 1.45;
+}
+
+.upgrade-summary-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px dashed rgba(244, 63, 94, 0.4);
+  padding: 1rem 1.2rem;
+  border-radius: var(--radius-md);
+}
+
+.upgrade-summary-box .tip-icon {
+  font-size: 1.2rem;
+}
+
+.upgrade-summary-box p {
+  font-size: 0.92rem;
+  color: #fecdd3;
+  line-height: 1.5;
+}
+
 

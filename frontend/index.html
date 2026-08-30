@@ -246,13 +246,50 @@
             </div>
           </div>
 
+          <!-- Travelers Input -->
+          <div class="form-group">
+            <label for="travelersInput" class="input-label">
+              Number of Travelers
+              <span class="input-hint">(Cost per person calculation)</span>
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">👥</span>
+              <input 
+                type="number" 
+                id="travelersInput" 
+                name="travelers" 
+                class="form-input" 
+                min="1" 
+                max="20" 
+                value="1" 
+                required
+              >
+            </div>
+          </div>
+
         </div>
 
         <!-- Submit Button -->
         <button type="submit" class="btn-submit" id="submit-btn">
           <span>✨ Plan Trip with Autonomous AI Agents</span>
         </button>
+
+        <div id="compare-trips-section" style="margin-top: 15px; text-align: center; display: none;">
+          <button id="compare-btn" type="button" class="btn-secondary" style="background: linear-gradient(135deg, #0284c7, #0f766e); color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer;">
+            📊 Compare Recent Trips (<span id="compare-count">0</span>)
+          </button>
+        </div>
       </form>
+
+      <!-- Side-by-Side Comparison Container -->
+      <div id="comparison-card" class="glass-card" style="display: none; margin-top: 20px; padding: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+          <h3 style="margin: 0; color: var(--text-primary); font-size: 1.2rem;">📊 Trip Comparison Summary</h3>
+          <button id="close-comparison-btn" style="background: none; border: none; color: #94a3b8; font-size: 1.2rem; cursor: pointer;">✖</button>
+        </div>
+        <div id="comparison-table-wrapper" style="overflow-x: auto;"></div>
+      </div>
+
     </main>
 
     <!-- Real-Time Agent Progress Tracker -->
@@ -352,6 +389,58 @@
         </div>
       </div>
 
+      <!-- Recommended Accommodation Card -->
+      <div class="stay-section-card" id="stay-card">
+        <div class="stay-card-header">
+          <div class="stay-header-title">
+            <span class="stay-icon">🏨</span>
+            <h3>Recommended Accommodation (Budget-Matched)</h3>
+          </div>
+          <span class="badge-stay-tier" id="stay-tier-badge">Budget Stay</span>
+        </div>
+        <div class="stay-card-body">
+          <div class="stay-main-info">
+            <h4 id="stay-name-text">Top-Rated Local Stay</h4>
+            <div class="stay-sub-details">
+              <span class="stay-price" id="stay-price-text">₹500 / night</span>
+              <span class="stay-area" id="stay-area-text">📍 Central City Center</span>
+            </div>
+          </div>
+          <p class="stay-why-text" id="stay-why-text">Matches your travel budget while keeping you close to major attractions and local transit.</p>
+        </div>
+      </div>
+
+      <!-- Smart Budget Upgrade Insights Card -->
+      <div class="upgrade-section-card" id="upgrade-card">
+        <div class="upgrade-card-header">
+          <div class="upgrade-header-title">
+            <span class="upgrade-icon">💡</span>
+            <h3>Smart Budget Upgrades (If You Spend +₹2,000 – ₹3,000 Extra)</h3>
+          </div>
+          <span class="badge-upgrade-amount" id="upgrade-amount-badge">+₹2,500 Extra</span>
+        </div>
+        <p class="upgrade-desc">Here is what premium experiences, hotel upgrades, and dining options unlock if you slightly increase your budget:</p>
+        
+        <div class="upgrade-grid">
+          <div class="upgrade-item-card">
+            <div class="upgrade-item-label">🏨 Stay Upgrade</div>
+            <p id="upgrade-hotel-text">Upgrade from hostel dorms to a cozy private 3-Star Boutique Hotel room with complimentary breakfast.</p>
+          </div>
+          <div class="upgrade-item-card">
+            <div class="upgrade-item-label">🍽️ Dining Upgrade</div>
+            <p id="upgrade-dining-text">Enjoy an authentic multi-course dinner at a famous rooftop heritage restaurant overlooking the city.</p>
+          </div>
+          <div class="upgrade-item-card">
+            <div class="upgrade-item-label">📍 Iconic Sight Upgrade</div>
+            <p id="upgrade-attraction-text">Unlock premium entry tickets for evening Light & Sound Show + Guided Sunset Boat Cruise.</p>
+          </div>
+        </div>
+        <div class="upgrade-summary-box">
+          <span class="tip-icon">✨</span>
+          <p id="upgrade-tip-text"><strong>Concierge Advice:</strong> Spending an extra ₹2,500 elevates your comfort level significantly with private rooms and signature dining!</p>
+        </div>
+      </div>
+
       <!-- Conversational Follow-Up Revision Section -->
       <div class="revision-card" id="revision-section">
         <div class="revision-header">
@@ -429,7 +518,7 @@
     <div class="modal-content glass-card">
       <button type="button" class="modal-close" id="modal-close-btn">&times;</button>
       <h3 style="font-family: 'Outfit', sans-serif; font-size: 1.35rem; margin-bottom: 0.5rem; color: #fff;">🔑 Sign In with Magic Link</h3>
-      <p class="modal-desc" style="color: #94a3b8; font-size: 0.9rem; margin-bottom: 1.25rem;">Enter your email to receive a secure passwordless login link.</p>
+      <p class="modal-desc" style="color: #94a3b8; font-size: 0.9rem; margin-bottom: 1.25rem;">Enter your email to receive a secure login link & token.</p>
       <form id="login-form">
         <div class="input-wrapper" style="margin-bottom: 1rem;">
           <span class="input-icon">✉️</span>
@@ -440,6 +529,22 @@
         </button>
       </form>
       <div id="login-msg" class="login-msg hidden" style="margin-top: 1rem; font-size: 0.85rem;"></div>
+
+      <div style="margin: 1.5rem 0 1rem; border-top: 1px solid rgba(255,255,255,0.1); position: relative; text-align: center;">
+        <span style="background: #111827; color: #94a3b8; font-size: 0.75rem; padding: 0 10px; position: relative; top: -10px; text-transform: uppercase; letter-spacing: 0.05em;">OR ENTER TOKEN / LINK</span>
+      </div>
+
+      <form id="verify-token-form">
+        <p style="color: #94a3b8; font-size: 0.825rem; margin-bottom: 0.75rem;">Opened email on your phone? Copy and paste your token or magic link URL below:</p>
+        <div class="input-wrapper" style="margin-bottom: 0.75rem;">
+          <span class="input-icon">🔑</span>
+          <input type="text" id="token-input" class="form-input" placeholder="Paste Token or Full Magic Link URL" required>
+        </div>
+        <button type="submit" class="btn-submit" id="verify-token-btn" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2);">
+          <span>🔓 Verify & Sign In</span>
+        </button>
+      </form>
+      <div id="token-msg" class="login-msg hidden" style="margin-top: 0.75rem; font-size: 0.85rem;"></div>
     </div>
   </div>
 

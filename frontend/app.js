@@ -415,6 +415,9 @@ document.addEventListener('DOMContentLoaded', () => {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
 
+    const travelersInput = document.getElementById('travelersInput');
+    const travelersVal = travelersInput ? (parseInt(travelersInput.value, 10) || 1) : 1;
+
     const payload = {
       origin: originInput.value.trim(),
       cities: citiesInput.value.trim(),
@@ -422,11 +425,13 @@ document.addEventListener('DOMContentLoaded', () => {
       trip_length: parseInt(daysSlider.value, 10),
       budget: parseFloat(budgetInput.value),
       currency: currentCurrency,
+      travelers: travelersVal,
       travel_mode: currentMode,
       food_preference: getSelectedFood(),
       travel_style: travelStyleSelect.value,
       language: languageSelect ? languageSelect.value : 'en',
     };
+
 
     if (!payload.origin || !payload.cities || !payload.interests) {
       showToast('⚠️ Please fill in all trip requirements.');
@@ -899,6 +904,10 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
         <div class="day-body">
+          ${day.weather_note ? `
+            <div class="weather-note-banner" style="background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 6px 12px; margin-bottom: 12px; font-size: 0.85rem; color: #60a5fa; display: flex; align-items: center; gap: 6px;">
+              <span>🌦️</span> <strong>Weather Forecast Note:</strong> ${escapeHtml(day.weather_note)}
+            </div>` : ''}
           ${day.morning ? `
             <div class="activity-block">
               <div class="time-slot-label">🌅 Morning</div>
@@ -941,6 +950,60 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       packingGrid.appendChild(itemEl);
     });
+
+    // Render Recommended Stay
+    const stayCard = document.getElementById('stay-card');
+    const stayTierBadge = document.getElementById('stay-tier-badge');
+    const stayNameText = document.getElementById('stay-name-text');
+    const stayPriceText = document.getElementById('stay-price-text');
+    const stayAreaText = document.getElementById('stay-area-text');
+    const stayWhyText = document.getElementById('stay-why-text');
+
+    const recStay = itinerary.recommended_stay;
+    if (recStay) {
+      if (stayTierBadge) stayTierBadge.textContent = recStay.category || 'Budget-Matched Stay';
+      if (stayNameText) stayNameText.textContent = recStay.name || 'Top-Rated Accommodation';
+      if (stayPriceText) stayPriceText.textContent = `${formatMoney(recStay.estimated_price_per_night || (userBudget * 0.25 / (itinerary.trip_length_days || 1)), activeCurrency)} / night`;
+      if (stayAreaText) stayAreaText.textContent = `📍 ${recStay.address_or_area || (city + ' Central')}`;
+      if (stayWhyText) stayWhyText.textContent = recStay.why_recommended || `Matches your budget tier perfectly while keeping you accessible to main sights.`;
+      if (stayCard) stayCard.classList.remove('hidden');
+    } else {
+      let fallbackCat = userBudget <= 5000 ? 'Budget Hostel / Homestay' : (userBudget <= 25000 ? 'Comfort 3-Star Hotel' : 'Luxury 5-Star Hotel');
+      let approxStayPrice = Math.round((userBudget * 0.28) / (itinerary.trip_length_days || 1));
+      if (stayTierBadge) stayTierBadge.textContent = fallbackCat;
+      if (stayNameText) stayNameText.textContent = `${city} Recommended ${fallbackCat}`;
+      if (stayPriceText) stayPriceText.textContent = `${formatMoney(approxStayPrice, activeCurrency)} / night`;
+      if (stayAreaText) stayAreaText.textContent = `📍 ${city} Prime Area`;
+      if (stayWhyText) stayWhyText.textContent = `Carefully selected stay matched to your overall budget of ${formatMoney(userBudget, activeCurrency)}.`;
+      if (stayCard) stayCard.classList.remove('hidden');
+    }
+
+    // Render Smart Budget Upgrades (+₹2,000 to ₹3,000)
+    const upgradeCard = document.getElementById('upgrade-card');
+    const upgradeAmountBadge = document.getElementById('upgrade-amount-badge');
+    const upgradeHotelText = document.getElementById('upgrade-hotel-text');
+    const upgradeDiningText = document.getElementById('upgrade-dining-text');
+    const upgradeAttractionText = document.getElementById('upgrade-attraction-text');
+    const upgradeTipText = document.getElementById('upgrade-tip-text');
+
+    const upgrades = itinerary.budget_upgrade_insights;
+    const upgradeAmt = upgrades ? (upgrades.extra_amount || 2500) : 2500;
+    const formattedUpgradeAmt = formatMoney(upgradeAmt, activeCurrency);
+
+    if (upgradeAmountBadge) upgradeAmountBadge.textContent = `+${formattedUpgradeAmt} Extra`;
+
+    if (upgrades) {
+      if (upgradeHotelText) upgradeHotelText.textContent = upgrades.hotel_upgrade || `Upgrade your stay to a higher-rated boutique hotel with free breakfast.`;
+      if (upgradeDiningText) upgradeDiningText.textContent = upgrades.dining_upgrade || `Enjoy iconic rooftop dining & regional tasting platters.`;
+      if (upgradeAttractionText) upgradeAttractionText.textContent = upgrades.attraction_upgrade || `Unlock entry to premium heritage light & sound shows and boat cruises.`;
+      if (upgradeTipText) upgradeTipText.innerHTML = `<strong>Concierge Advice:</strong> ${escapeHtml(upgrades.summary_tip || `Spending an extra ${formattedUpgradeAmt} dramatically enhances your comfort and unlocks iconic highlights in ${city}!`)}`;
+    } else {
+      if (upgradeHotelText) upgradeHotelText.textContent = `Upgrade from basic rooms/dorms to a highly-rated 3-Star Boutique Hotel with AC & breakfast.`;
+      if (upgradeDiningText) upgradeDiningText.textContent = `Experience signature dining at top-rated heritage restaurants and famous scenic view cafes in ${city}.`;
+      if (upgradeAttractionText) upgradeAttractionText.textContent = `Add evening sunset boat cruise, sound & light show tickets, and private auto/cab transfers.`;
+      if (upgradeTipText) upgradeTipText.innerHTML = `<strong>Concierge Advice:</strong> If you increase your budget by just <strong>+${formattedUpgradeAmt}</strong>, you unlock private rooms, iconic dining, and hassle-free transit in ${city}!`;
+    }
+    if (upgradeCard) upgradeCard.classList.remove('hidden');
 
     // Show Results
     resultsSection.classList.add('active');
@@ -1126,7 +1189,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (res.ok) {
           loginMsg.className = 'login-msg';
           loginMsg.style.color = '#4ade80';
-          loginMsg.textContent = data.message;
+          if (data.verify_url) {
+            loginMsg.innerHTML = `
+              <div>${escapeHtml(data.message)}</div>
+              <div style="margin-top:12px;">
+                <a href="${escapeHtml(data.verify_url)}" class="btn primary small" style="display:inline-block; text-decoration:none; padding:8px 16px; border-radius:8px; font-weight:600; background:linear-gradient(135deg, #6366f1, #8b5cf6); color:#ffffff; box-shadow: 0 4px 12px rgba(99,102,241,0.4);">⚡ Click Here to Sign In Now</a>
+              </div>
+            `;
+          } else {
+            loginMsg.textContent = data.message;
+          }
           loginMsg.classList.remove('hidden');
           showToast('📧 Magic login link dispatched!');
         } else {
@@ -1143,6 +1215,65 @@ document.addEventListener('DOMContentLoaded', () => {
         submitBtn.innerHTML = `<span>✨ Send Magic Login Link</span>`;
       }
     });
+  }
+
+  // --- Manual Token Verification Handler ---
+  const verifyTokenForm = document.getElementById('verify-token-form');
+  const tokenInput = document.getElementById('token-input');
+  const tokenMsg = document.getElementById('token-msg');
+  const verifyTokenBtn = document.getElementById('verify-token-btn');
+
+  if (verifyTokenForm) {
+    verifyTokenForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const rawToken = tokenInput.value.trim();
+      if (!rawToken) return;
+
+      verifyTokenBtn.disabled = true;
+      verifyTokenBtn.innerHTML = `<span>Verifying...</span>`;
+
+      try {
+        const res = await fetch('/api/auth/verify-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: rawToken }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          tokenMsg.className = 'login-msg';
+          tokenMsg.style.color = '#4ade80';
+          tokenMsg.textContent = '✅ Token verified! Redirecting to My Trips...';
+          tokenMsg.classList.remove('hidden');
+          showToast('🎉 Logged in successfully!');
+          setTimeout(() => {
+            window.location.href = '/my-trips';
+          }, 800);
+        } else {
+          tokenMsg.className = 'login-msg';
+          tokenMsg.style.color = '#f87171';
+          tokenMsg.textContent = data.detail || 'Invalid or expired token.';
+          tokenMsg.classList.remove('hidden');
+        }
+      } catch (err) {
+        console.error(err);
+        showToast('❌ Failed to verify token');
+      } finally {
+        verifyTokenBtn.disabled = false;
+        verifyTokenBtn.innerHTML = `<span>🔓 Verify & Sign In</span>`;
+      }
+    });
+  }
+
+  // Handle URL Query Params (e.g. auth_error)
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.has('auth_error')) {
+    const err = urlParams.get('auth_error');
+    if (err === 'invalid_or_expired_token') {
+      showToast('❌ Invalid or expired magic link. Please request a new one.');
+    } else if (err === 'login_required') {
+      showToast('🔑 Please sign in to view your saved trips.');
+    }
+    window.history.replaceState({}, document.title, window.location.pathname);
   }
 
   // Initial Presets & Auth Check Render

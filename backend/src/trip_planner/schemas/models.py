@@ -34,6 +34,7 @@ class TripPlanRequest(BaseModel):
     trip_length: int = Field(default=5, ge=1, le=30, description="Duration of trip in days")
     budget: float = Field(default=25000.0, gt=0, description="Budget in chosen currency")
     currency: str = Field(default="INR", description="Budget currency code")
+    travelers: int = Field(default=1, ge=1, le=20, description="Number of travelers for group trip cost splitting")
     travel_mode: str | None = Field(default="domestic", description="Travel mode (domestic vs international)")
     language: str = Field(default="en", description="Output language code: 'en', 'te', or 'hi'")
 
@@ -60,6 +61,22 @@ class CitySelection(BaseModel):
     currency: str = Field(
         default="INR", description="Currency symbol or code (e.g., INR or USD)"
     )
+
+    @field_validator("estimated_daily_budget", mode="before")
+    @classmethod
+    def _parse_budget_float(cls, v: object) -> float:
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            import re
+            numbers = re.findall(r"\d[\d,]*", v)
+            if numbers:
+                clean_num = numbers[0].replace(",", "")
+                try:
+                    return float(clean_num)
+                except ValueError:
+                    pass
+        return 5000.0
 
 
 class Attraction(BaseModel):
@@ -103,6 +120,57 @@ class ItineraryDay(BaseModel):
         default_factory=list,
         description="Itemized breakdown of expenses for this day summing to estimated_cost",
     )
+    weather_note: str | None = Field(
+        default=None,
+        description="Weather note for the day, e.g. 'Rain likely (70%) - indoor plan recommended'",
+    )
+
+    @field_validator("morning", "afternoon", "evening", mode="before")
+    @classmethod
+    def _ensure_day_section(cls, v: object) -> str:
+        if v is None or v == "":
+            return "Explore key local sights, markets, and regional dining."
+        return str(v)
+
+
+class AccommodationOption(BaseModel):
+    name: str = Field(..., description="Name of recommended hotel, hostel, resort, or homestay")
+    category: str = Field(
+        default="Budget Stay",
+        description="Stay tier category, e.g., 'Budget Hostel/Dorm', 'Homestay', 'Comfort 3-Star Hotel', 'Luxury 5-Star Resort'",
+    )
+    estimated_price_per_night: float = Field(
+        ..., description="Approximate price per night in the user's currency"
+    )
+    address_or_area: str = Field(..., description="Key neighborhood, area, or proximity to city center")
+    why_recommended: str = Field(
+        ..., description="Why this stay perfectly matches the traveler's budget and trip vibe"
+    )
+
+
+class SmartBudgetUpgrade(BaseModel):
+    extra_amount: float = Field(
+        default=2500.0, description="Suggested additional spend amount (e.g. 2000 to 3000 INR)"
+    )
+    hotel_upgrade: str | None = Field(
+        default=None, description="Recommended hotel/room tier upgrade if spending extra"
+    )
+    dining_upgrade: str | None = Field(
+        default=None, description="Recommended dining, cafe, or food experience upgrade if spending extra"
+    )
+    attraction_upgrade: str | None = Field(
+        default=None, description="Recommended extra famous attraction or premium activity unlocked with extra budget"
+    )
+    summary_tip: str = Field(
+        ..., description="Helpful summary advice explaining why spending this extra amount adds huge value"
+    )
+
+    @field_validator("summary_tip", mode="before")
+    @classmethod
+    def _ensure_summary_tip(cls, v: object) -> str:
+        if v is None or v == "":
+            return "A small budget increase unlocks significantly better stays, dining, and activities."
+        return str(v)
 
 
 class TripItinerary(BaseModel):
@@ -114,13 +182,25 @@ class TripItinerary(BaseModel):
     currency: str = Field(
         default="INR", description="Currency code/symbol, e.g., INR, USD"
     )
+    travelers: int = Field(
+        default=1, ge=1, le=20, description="Number of travelers in the group"
+    )
     total_estimated_cost: float = Field(
         ..., description="Total estimated trip cost in chosen currency"
+    )
+    cost_per_person: float = Field(
+        default=0.0, description="Cost per person in chosen currency (total_estimated_cost / travelers)"
     )
     days: list[ItineraryDay]
     packing_suggestions: list[str]
     local_transport_advice: list[str] | None = Field(
         default=None, description="Key transit tips (e.g., Vande Bharat/Trains, Cabs, Metro, Rentals)"
+    )
+    recommended_stay: AccommodationOption | None = Field(
+        default=None, description="Recommended hotel/stay tailored specifically to the user's budget"
+    )
+    budget_upgrade_insights: SmartBudgetUpgrade | None = Field(
+        default=None, description="Suggestions for what extra luxury/attractions unlock if user spends ₹2,000–₹3,000 more"
     )
 
     @model_validator(mode="after")
@@ -135,7 +215,10 @@ class TripItinerary(BaseModel):
             computed_sum = round(sum(day.estimated_cost for day in self.days), 2)
             if computed_sum > 0:
                 self.total_estimated_cost = computed_sum
+        num_travelers = max(1, self.travelers) if self.travelers else 1
+        self.cost_per_person = round(self.total_estimated_cost / num_travelers, 2)
         return self
+
 
 
 class RevisionRequest(BaseModel):

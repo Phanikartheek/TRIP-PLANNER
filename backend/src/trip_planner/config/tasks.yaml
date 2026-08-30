@@ -35,27 +35,53 @@ plan_itinerary_task:
     Each day must have a theme, and a morning/afternoon/evening plan.
     Ground activity choices in the attractions and food already researched.
     ALWAYS specify real, famous, iconic spots by name (e.g., exact well-known restaurants with must-try signature dishes, trending cafes, popular shopping malls/cinemas, and scenic landmarks) rather than generic descriptions.
+    CONCISE WRITING STYLE & TOKEN BOUNDS: Keep morning, afternoon, and evening descriptions crisp, engaging, and concise (under 80 words per time slot). Avoid overly verbose bulleted lists within a single field so that the JSON tool call remains compact and fully valid.
     For EACH day, provide an itemized line-item expense breakdown in cost_breakdown (e.g. [{"item": "Cab fare to temple", "amount": 400}, {"item": "Lunch at Babai Hotel", "amount": 350}]) that sums to that day's estimated_cost.
-    Estimate per-day costs (estimated_cost) and total trip cost (total_estimated_cost)
-    strictly in the traveler's budget currency, staying within the overall budget of {budget}.
-    Ensure the total_estimated_cost is exactly equal to the arithmetic sum of the individual
-    estimated_cost values across all days. Provide a practical packing list
-    appropriate for the destination and season, and key transit advice.
+    
+    GROUP TRIP SIZE & TRAVELERS:
+    This trip is planned for {travelers} traveler(s).
+    Set `travelers` in the output model to {travelers}.
+    Take group size into account: for groups of 2+ travelers, suggest suitable shared accommodation (e.g., family room, 2-bedroom homestay, or shared dorm/suite) rather than individual single rooms.
+
+    WEATHER FORECAST & WEATHER-AWARE PLANNING:
+    Real destination weather forecast data:
+    {weather_forecast}
+    - Read the weather forecast for each day.
+    - If rain probability is high (>50%) on a given day, prefer indoor/covered activities (museums, indoor markets, covered temples, cafes) and explicitly note it in `weather_note` for that day (e.g., "Rain likely (70%) - indoor museum and cafe plan recommended").
+    - If rain probability is low or clear/sunny, outdoor activities (forts, parks, outdoor walking tours) are great and note it in `weather_note` (e.g., "Clear skies (10% rain) - ideal for outdoor fort exploration").
+    - If weather data is unavailable, populate `weather_note` with "Weather data unavailable - standard seasonal precautions apply".
+
+    STRICT BUDGET CONTROLS & ITEMIZATION RULES:
+    The traveler's overall budget is {budget} in currency {currency} for {trip_length} days for the group of {travelers} traveler(s).
+    Estimate per-day costs (estimated_cost) and total trip cost (total_estimated_cost) strictly inside or near the stated budget of {budget}.
+    If the budget is low (e.g. under 5000 INR for multi-day trips), scale daily activities to budget stays/dorms, street food, and free/low-cost sights so that total_estimated_cost does NOT wildly exceed {budget}.
+    Ensure the total_estimated_cost is exactly equal to the arithmetic sum of the individual estimated_cost values across all days.
+
+    NO MISCELLANEOUS OR PADDING FILLER:
+    - Every item in `cost_breakdown` MUST be a real, specific named expenditure (e.g., "Entry ticket to Undavalli Caves", "Auto fare from Station to Kanaka Durga Temple", "Lunch: Gongura Mutton at Babai Hotel", "Evening snack: Mirchi Bajji").
+    - ABSOLUTELY FORBID generic catch-all filler or padding line items such as "Miscellaneous", "Misc", "Other expenses", "Buffer", "Shopping & extra", or "Unforeseen costs".
+    - Every single rupee in the daily cost breakdown must be accounted for by explicit, realistic, named activities, meals, transit, or accommodation.
+
+    ACCOMMODATION & BUDGET UPGRADE INSIGHTS:
+    1. Provide `recommended_stay`: Select a specific real hotel, hostel, homestay, or resort in the destination city that fits the stated budget tier and accommodates {travelers} traveler(s).
+    2. Provide `budget_upgrade_insights`: Suggest what extra hotel quality, dining experiences, or additional famous attractions/activities the tourist could unlock if they increased their total budget by 2000 to 3000 in stated currency ({currency}). Give enthusiastic, specific recommendations!
 
     LANGUAGE & PLACE NAME INSTRUCTIONS:
     The requested target output language is: "{language}".
-    - If "{language}" is "te" (Telugu), write all free-text user-facing descriptions (day theme, morning, afternoon, evening, packing_suggestions, local_transport_advice) in natural Telugu script (తెలుగు).
+    - If "{language}" is "te" (Telugu), write all free-text user-facing descriptions (day theme, morning, afternoon, evening, packing_suggestions, local_transport_advice, why_recommended, summary_tip) in natural Telugu script (తెలుగు).
     - If "{language}" is "hi" (Hindi), write all free-text user-facing descriptions in natural Hindi/Devanagari script (हिंदी).
     - If "{language}" is "en" or unspecified, write in standard English.
     - CRITICAL PLACE NAME RULE: Keep all specific place names, restaurant names, hotel names, street names, and landmark names (e.g., "Kanaka Durga Temple", "Babai Hotel", "Besant Road", "Prakasam Barrage") in English/Roman script across all output languages so they remain clear, searchable, and useful for navigation on maps.
   expected_output: >-
     A complete itinerary covering every day of the trip in the requested output language ({language}), with currency, total
     estimated cost matching the sum of daily estimated costs, daily breakdowns with itemized cost_breakdown lists,
-    transit advice, and a packing list matching the schema.
+    weather_note for each day reflecting weather conditions, travelers count matching input, cost_per_person,
+    recommended stay tailored to group size and budget, budget upgrade insights (+2000 to 3000), transit advice, and a packing list.
   agent: travel_concierge
   context:
     - select_city_task
     - gather_city_info_task
+
 
 revise_itinerary_task:
   description: >-
