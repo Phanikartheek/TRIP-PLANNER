@@ -77,20 +77,113 @@ def _clean_messages(messages):
     return cleaned
 
 
+def get_role(m: Any) -> str:
+    if isinstance(m, dict):
+        return str(m.get("role", "")).lower()
+    if hasattr(m, "role"):
+        return str(getattr(m, "role", "")).lower()
+    if hasattr(m, "type"):
+        t = str(getattr(m, "type", "")).lower()
+        if "human" in t or "user" in t:
+            return "user"
+        if "system" in t:
+            return "system"
+        if "ai" in t or "assistant" in t:
+            return "assistant"
+    return ""
+
+
+def get_content(m: Any) -> str:
+    if isinstance(m, dict):
+        return str(m.get("content", ""))
+    if hasattr(m, "content"):
+        return str(getattr(m, "content", ""))
+    return ""
+
+
+def _trim_messages(messages: list[Any]) -> list[Any]:
+    """
+    Trims message history to prevent token overflow.
+    Preserves system prompt and current user task message intact,
+    while smartly compressing previous task outputs and assistant search logs.
+    """
+    if not isinstance(messages, list) or len(messages) <= 6:
+        return messages
+
+    system_msgs = []
+    user_msgs = []
+    assistant_msgs = []
+
+    for m in messages:
+        role = get_role(m)
+        if role == "system":
+            system_msgs.append(m)
+        elif role == "user":
+            user_msgs.append(m)
+        else:
+            assistant_msgs.append(m)
+
+    # Trim prior task outputs in user_msgs (all except the last user_msg which is the current task prompt)
+    if len(user_msgs) > 1:
+        for msg in user_msgs[:-1]:
+            content = get_content(msg)
+            if len(content) > 500:
+                new_content = content[:250] + "\n...[context trimmed]...\n" + content[-250:]
+                if isinstance(msg, dict):
+                    msg["content"] = new_content
+                elif hasattr(msg, "content"):
+                    try:
+                        setattr(msg, "content", new_content)
+                    except Exception:
+                        pass
+
+    # Keep last 2 assistant search iterations
+    trimmed_assistant = assistant_msgs[-2:]
+
+    # Truncate assistant search messages if over 500 chars
+    for msg in trimmed_assistant:
+        content = get_content(msg)
+        if len(content) > 500:
+            new_content = content[:250] + "\n...[truncated]...\n" + content[-250:]
+            if isinstance(msg, dict):
+                msg["content"] = new_content
+            elif hasattr(msg, "content"):
+                try:
+                    setattr(msg, "content", new_content)
+                except Exception:
+                    pass
+
+    result = []
+    for msg in messages:
+        if msg in system_msgs or msg in user_msgs or msg in trimmed_assistant:
+            if msg not in result:
+                result.append(msg)
+
+    return result
+
+
 def _resilient_llm_call(self, *args, **kwargs):
     clean_args = [_clean_messages(a) for a in args]
     if "messages" in kwargs:
         kwargs["messages"] = _clean_messages(kwargs["messages"])
 
-    max_retries = 8
+    # Always trim messages proactively if context has >6 messages or args are long
+    if "messages" in kwargs and isinstance(kwargs["messages"], list) and len(kwargs["messages"]) > 6:
+        kwargs["messages"] = _trim_messages(kwargs["messages"])
+    clean_args = [_trim_messages(a) for a in clean_args]
+
+    max_retries = 15
     for attempt in range(max_retries):
         try:
             return _original_llm_call(self, *clean_args, **kwargs)  # type: ignore[call-arg]
         except Exception as e:
             err_msg = str(e)
-            if ("rate_limit" in err_msg.lower() or "429" in err_msg) and attempt < max_retries - 1:
+            if ("rate_limit" in err_msg.lower() or "429" in err_msg or "too large" in err_msg.lower() or "tool_use_failed" in err_msg.lower() or "failed to call a function" in err_msg.lower()) and attempt < max_retries - 1:
+                clean_args = [_trim_messages(a) for a in clean_args]
+                if "messages" in kwargs:
+                    kwargs["messages"] = _trim_messages(kwargs["messages"])
                 parsed_sleep = _parse_retry_after(err_msg)
-                sleep_sec = parsed_sleep if parsed_sleep is not None else (15.0 + (attempt * 10))
+                sleep_sec = parsed_sleep if parsed_sleep is not None else (10.0 + (attempt * 5))
                 time.sleep(sleep_sec)
                 continue
             if "tool choice is none" in err_msg.lower() and kwargs.get("tools"):
@@ -111,7 +204,7 @@ def _default_llm() -> LLM:
     change, not a find-and-replace across the file.
     """
     model = os.getenv("TRIP_PLANNER_MODEL", "groq/openai/gpt-oss-120b")
-    return LLM(model=model, temperature=0.4)
+    return LLM(model=model, temperature=0.4, max_retries=10)
 
 
 @CrewBase
@@ -132,7 +225,8 @@ class TripPlannerCrew:
             config=self.agents_config["city_selector"],
             tools=[self.search_tool],
             llm=self.llm,
-            max_iter=5,
+            max_iter=3,
+            max_retry_limit=10,
         )
 
     @agent
@@ -141,7 +235,8 @@ class TripPlannerCrew:
             config=self.agents_config["local_expert"],
             tools=[self.search_tool, self.scrape_tool],
             llm=self.llm,
-            max_iter=5,
+            max_iter=3,
+            max_retry_limit=10,
         )
 
     @agent
@@ -150,7 +245,8 @@ class TripPlannerCrew:
             config=self.agents_config["travel_concierge"],
             tools=[self.search_tool],
             llm=self.llm,
-            max_iter=5,
+            max_iter=3,
+            max_retry_limit=10,
         )
 
     @agent
@@ -160,6 +256,7 @@ class TripPlannerCrew:
             tools=[self.search_tool, self.scrape_tool],
             llm=self.llm,
             max_iter=10,
+            max_retry_limit=10,
         )
 
     @task
@@ -168,6 +265,7 @@ class TripPlannerCrew:
             config=self.tasks_config["select_city_task"],
             agent=self.city_selector(),
             output_pydantic=CitySelection,
+            max_retries=10,
         )
 
     @task
@@ -176,6 +274,7 @@ class TripPlannerCrew:
             config=self.tasks_config["gather_city_info_task"],
             agent=self.local_expert(),
             output_pydantic=CityGuide,
+            max_retries=10,
         )
 
     @task
@@ -184,6 +283,7 @@ class TripPlannerCrew:
             config=self.tasks_config["plan_itinerary_task"],
             agent=self.travel_concierge(),
             output_pydantic=TripItinerary,
+            max_retries=10,
         )
 
     @task
@@ -192,6 +292,7 @@ class TripPlannerCrew:
             config=self.tasks_config["revise_itinerary_task"],
             agent=self.travel_concierge(),
             output_pydantic=TripItinerary,
+            max_retries=10,
         )
 
     @task
@@ -200,6 +301,7 @@ class TripPlannerCrew:
             config=self.tasks_config["answer_destination_question_task"],
             agent=self.local_qa_expert(),
             output_pydantic=QAResponse,
+            max_retries=10,
         )
 
     @crew

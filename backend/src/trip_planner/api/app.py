@@ -37,6 +37,7 @@ from trip_planner.schemas.models import (
     RevisionRequest,
     TripPlanRequest,
 )
+from trip_planner.tools import format_forecast_summary, get_forecast
 
 load_dotenv()
 logger = logging.getLogger("trip_planner.api")
@@ -112,6 +113,10 @@ class LoginRequest(BaseModel):
     email: str = Field(..., description="User email address for magic link login")
 
 
+class VerifyTokenRequest(BaseModel):
+    token: str = Field(..., description="Magic token or full verification URL")
+
+
 class JobStatusResponse(BaseModel):
     job_id: str
     status: str = Field(description="Job status: pending, running, complete, or failed")
@@ -129,14 +134,24 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
     crew_instance = TripPlannerCrew().crew()
     result = crew_instance.kickoff(inputs=inputs)
 
+    out_dict = {}
     if hasattr(result, "pydantic") and result.pydantic:
-        return result.pydantic.model_dump()
+        out_dict = result.pydantic.model_dump()
     elif hasattr(result, "raw"):
         try:
-            return json.loads(result.raw)
+            out_dict = json.loads(result.raw)
         except Exception:
-            return {"raw_output": result.raw}
-    return {"raw_output": str(result)}
+            out_dict = {"raw_output": result.raw}
+    else:
+        out_dict = {"raw_output": str(result)}
+
+    if isinstance(out_dict, dict) and "travelers" in inputs:
+        req_travelers = int(inputs.get("travelers", 1))
+        out_dict["travelers"] = req_travelers
+        tot_cost = float(out_dict.get("total_estimated_cost", 0.0))
+        out_dict["cost_per_person"] = round(tot_cost / max(1, req_travelers), 2)
+
+    return out_dict
 
 
 def _run_revision_sync(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -451,46 +466,78 @@ async def get_shareable_trip(job_id: str):
         "days": result.get("days", []),
         "packing_suggestions": result.get("packing_suggestions", []),
         "local_transport_advice": result.get("local_transport_advice", []),
+        "recommended_stay": result.get("recommended_stay"),
+        "budget_upgrade_insights": result.get("budget_upgrade_insights"),
     }
     return clean_itinerary
 
 
 
 @app.post("/api/auth/request-login")
-@limiter.limit("3/hour")
+@limiter.limit("30/hour")
 async def request_login_endpoint(request: Request, payload: LoginRequest):
     raw_email = payload.email.strip().lower()
     if "@" not in raw_email or "." not in raw_email:
         raise HTTPException(status_code=400, detail="Invalid email address format.")
 
     token = db.create_login_token(raw_email)
-    verify_url = f"{request.base_url}api/auth/verify?token={token}"
+    base_str = str(request.base_url).rstrip("/")
+    if "0.0.0.0" in base_str:
+        base_str = base_str.replace("0.0.0.0", "127.0.0.1")
+
+    app_url_env = os.getenv("APP_URL")
+    if app_url_env:
+        base_str = app_url_env.rstrip("/")
+
+    verify_url = f"{base_str}/api/auth/verify?token={token}"
 
     resend_key = os.getenv("RESEND_API_KEY")
+    email_sent = False
     if resend_key:
         resend.api_key = resend_key
         try:
+            email_html = f'''
+            <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 500px; border: 1px solid #e0e0e0; border-radius: 8px;">
+              <h2 style="color: #4f46e5;">✈️ AI Trip Planner Sign In</h2>
+              <p>Click the link below to sign in to your AI Trip Planner account:</p>
+              <p style="margin: 20px 0;">
+                <a href="{verify_url}" style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Sign In to AI Trip Planner</a>
+              </p>
+              <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+              <p style="font-size: 14px; color: #374151;"><strong>Opened email on mobile or another browser?</strong></p>
+              <p style="font-size: 13px; color: #4b5563;">Copy and paste this Token into the login screen on your PC:</p>
+              <div style="background: #f3f4f6; padding: 10px; border-radius: 6px; font-family: monospace; word-break: break-all; font-weight: bold; color: #1f2937; margin: 10px 0;">{token}</div>
+              <p style="font-size: 12px; color: #6b7280; margin-top: 15px;">This magic link & token expire in 15 minutes.</p>
+            </div>
+            '''
             resend.Emails.send({
                 "from": "AI Trip Planner <onboarding@resend.dev>",
                 "to": [raw_email],
                 "subject": "Magic Link Sign In for AI Trip Planner",
-                "html": f'<p>Click the link below to sign in to AI Trip Planner:</p><p><a href="{verify_url}">Sign In to AI Trip Planner</a></p><p>This link expires in 15 minutes.</p>',
+                "html": email_html,
             })
+            email_sent = True
         except Exception as e:
             logger.error(f"Failed to dispatch magic link email via Resend API: {e}")
-    else:
+
+    if not email_sent:
         logger.warning(
             "\n" + "=" * 80 +
-            "\n[SECURITY WARNING] RESEND_API_KEY is NOT configured in environment!\n" +
+            "\n[SECURITY WARNING] RESEND_API_KEY is NOT configured properly or email delivery failed!\n" +
             "Magic login link printed to server console FOR LOCAL DEVELOPMENT ONLY.\n" +
-            "DO NOT USE THIS FALLBACK IN A DEPLOYED OR PUBLIC ENVIRONMENT!\n" +
             f"MAGIC LOGIN LINK FOR {raw_email}: {verify_url}\n" +
+            f"MAGIC TOKEN FOR {raw_email}: {token}\n" +
             "=" * 80 + "\n"
         )
         print(f"\n[MAGIC LINK FOR {raw_email}]: {verify_url}\n", flush=True)
 
+    msg = "A magic login link has been sent! Please check your email inbox." if email_sent else "A magic login link has been sent to server logs (local mode). Click below to sign in."
+
     return {
-        "message": "If this email is valid, a magic login link has been sent. Please check your inbox or server logs."
+        "message": msg,
+        "email_sent": email_sent,
+        "token": token,
+        "verify_url": verify_url if not email_sent else None,
     }
 
 
@@ -502,6 +549,29 @@ async def verify_login_endpoint(token: str):
 
     session_token = db.create_session(email)
     response = RedirectResponse(url="/my-trips", status_code=303)
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        max_age=7 * 24 * 3600,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/auth/verify-token")
+async def verify_token_endpoint(payload: VerifyTokenRequest):
+    raw_token = payload.token.strip()
+    if "token=" in raw_token:
+        raw_token = raw_token.split("token=")[-1].split("&")[0].strip()
+
+    email = db.verify_and_consume_login_token(raw_token)
+    if not email:
+        raise HTTPException(status_code=400, detail="Invalid or expired magic token. Please request a new one.")
+
+    session_token = db.create_session(email)
+    response = JSONResponse({"message": "Successfully authenticated!", "email": email})
     response.set_cookie(
         key="session_token",
         value=session_token,
@@ -577,8 +647,12 @@ async def health_check():
     }
 
 
+class CompareTripsRequest(BaseModel):
+    job_ids: list[str] = Field(..., description="List of 2 to 3 completed job IDs to compare")
+
+
 @app.post("/api/plan-trip", response_model=JobStatusResponse)
-@limiter.limit("5/hour")
+@limiter.limit("30/minute")
 async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
     """
     Accepts trip parameters, initializes an async background job,
@@ -603,6 +677,18 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
             detail="GROQ_API_KEY is not configured in the environment or .env file.",
         )
 
+    # Fetch weather forecast with explicit error resiliency
+    weather_forecast_str = "Weather data unavailable (seasonal weather guidelines apply)."
+    try:
+        primary_city = payload.cities.split(",")[0].strip()
+        fc_list = get_forecast(primary_city, payload.trip_length)
+        if fc_list:
+            weather_forecast_str = format_forecast_summary(fc_list)
+    except Exception as e:
+        logger.warning(
+            f"Weather forecast lookup failed for city '{payload.cities}': {e}. Using generic seasonal fallback."
+        )
+
     crew_inputs = {
         "origin": payload.origin.strip(),
         "cities": payload.cities.strip(),
@@ -610,6 +696,8 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
         "trip_length": str(payload.trip_length),
         "budget": f"₹{payload.budget:,.0f} {payload.currency}" if payload.currency == "INR" else f"{payload.currency} {payload.budget:,.0f}",
         "currency": payload.currency,
+        "travelers": str(payload.travelers),
+        "weather_forecast": weather_forecast_str,
         "language": payload.language,
     }
 
@@ -625,6 +713,60 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
         status="pending",
         created_at=job_rec["created_at"],
     )
+
+
+@app.post("/api/compare-trips")
+async def compare_trips_endpoint(payload: CompareTripsRequest):
+    """
+    Accepts 2 to 3 completed job_ids and returns a structural comparison summary
+    (destination, costs, travelers, cost_per_person, trip length, and weather summary).
+    Does NOT require LLM execution.
+    """
+    if not payload.job_ids or len(payload.job_ids) < 2 or len(payload.job_ids) > 3:
+        raise HTTPException(
+            status_code=400,
+            detail="Comparison requires between 2 and 3 job IDs.",
+        )
+
+    comparisons = []
+    for jid in payload.job_ids:
+        job = db.get_job(jid)
+        if not job:
+            raise HTTPException(status_code=404, detail=f"Trip job '{jid}' not found.")
+        if job.get("status") != "complete" or not job.get("result"):
+            raise HTTPException(status_code=400, detail=f"Trip job '{jid}' is not complete.")
+
+        res = job["result"]
+        days = res.get("days", [])
+        rain_days_count = 0
+        for d in days:
+            wnote = (d.get("weather_note") or "").lower()
+            if "rain" in wnote or "shower" in wnote or "storm" in wnote or "drizzle" in wnote:
+                rain_days_count += 1
+
+        if rain_days_count == 0:
+            w_summary = "Mostly clear / pleasant"
+        else:
+            w_summary = f"Rain likely on {rain_days_count} of {len(days)} days"
+
+        total_cost = res.get("total_estimated_cost", 0.0)
+        travelers_cnt = res.get("travelers", 1)
+        cost_pp = res.get("cost_per_person", round(total_cost / max(1, travelers_cnt), 2))
+
+        comparisons.append({
+            "job_id": jid,
+            "destination_city": res.get("destination_city", "Unknown"),
+            "destination_country": res.get("destination_country", "India"),
+            "trip_length_days": res.get("trip_length_days", 1),
+            "currency": res.get("currency", "INR"),
+            "total_estimated_cost": total_cost,
+            "cost_per_person": cost_pp,
+            "travelers": travelers_cnt,
+            "weather_summary": w_summary,
+        })
+
+    return {"comparison": comparisons}
+
 
 
 @app.post("/api/revise-trip", response_model=JobStatusResponse)

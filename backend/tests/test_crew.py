@@ -221,6 +221,8 @@ def test_qa_response_schema_validation_with_grounding_claims():
 
 def test_ask_question_multi_turn_history_passed_to_context():
     """Confirm conversation history from Turn 1 is passed into Turn 2's context."""
+    from unittest.mock import patch
+
     from fastapi.testclient import TestClient
     from trip_planner.api import db
     from trip_planner.api.app import app
@@ -244,11 +246,12 @@ def test_ask_question_multi_turn_history_passed_to_context():
         ],
     )
 
-    # Submit second turn question
-    res = client.post(
-        "/api/ask-question",
-        json={"job_id": root_job_id, "question": "Is there anything cheaper than that nearby?"},
-    )
+    with patch("trip_planner.api.app._execute_qa_job"):
+        # Submit second turn question
+        res = client.post(
+            "/api/ask-question",
+            json={"job_id": root_job_id, "question": "Is there anything cheaper than that nearby?"},
+        )
     assert res.status_code == 200
     new_qa_job_id = res.json()["job_id"]
 
