@@ -3366,6 +3366,19 @@ wheels = [
 ]
 
 [[package]]
+name = "reportlab"
+version = "5.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "charset-normalizer" },
+    { name = "pillow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4a/51/dbe28534ae12c852f61be91f039f343305fd1f34f1c66b8de75afae7a525/reportlab-5.0.1.tar.gz", hash = "sha256:ebd13154be1c8515e665de70bd2d303ae9ddc3ef47e44afd5116441ca0283a26", size = 3945711, upload-time = "2026-08-20T13:48:16.461Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/db/cb/dacbc268cb68d0428ea2cbd85266195a9ab3e677449589ddae59bd7542ac/reportlab-5.0.1-py3-none-any.whl", hash = "sha256:1c36e6bb0e71780c72331eba60da7f602e8d4389a8723825af71342e49d791e8", size = 1957258, upload-time = "2026-08-20T13:48:14.026Z" },
+]
+
+[[package]]
 name = "requests"
 version = "2.34.2"
 source = { registry = "https://pypi.org/simple" }
@@ -3391,6 +3404,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/42/f2/05f29bc3913aea15eb670be136045bf5c5bbf4b99ecb839da9b422bb2c85/requests-oauthlib-2.0.0.tar.gz", hash = "sha256:b3dffaebd884d8cd778494369603a9e7b58d29111bf6b41bdc2dcd87203af4e9", size = 55650, upload-time = "2024-03-22T20:32:29.939Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3b/5d/63d4ae3b9daea098d5d6f5da83984853c1bbacd5dc826764b249fe119d24/requests_oauthlib-2.0.0-py2.py3-none-any.whl", hash = "sha256:7dd8a5c40426b779b0868c404bdef9768deccf22749cde15852df527e6269b36", size = 24179, upload-time = "2024-03-22T20:32:28.055Z" },
+]
+
+[[package]]
+name = "resend"
+version = "2.42.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/99/2e/099e4ca14981eef047513735b5b4855961219fa0e9faacea351288c7bc38/resend-2.42.0.tar.gz", hash = "sha256:a65e7f4dba8b3908298026f204264d2f2333e63e86dfce75212f85a2ee192c09", size = 60433, upload-time = "2026-08-26T19:59:34.653Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/09/03/2b3d907779398a31e5a00f23164a12d6f3b9e5a701a3800c1321c0b06ed2/resend-2.42.0-py2.py3-none-any.whl", hash = "sha256:2d759b180b43fb95563ad8923b341906c524e38633949f1f289e7447694e9bf4", size = 92378, upload-time = "2026-08-26T19:59:32.743Z" },
 ]
 
 [[package]]
@@ -3836,6 +3862,8 @@ dependencies = [
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "python-dotenv" },
+    { name = "reportlab" },
+    { name = "resend" },
     { name = "slowapi" },
     { name = "uvicorn" },
 ]
@@ -3857,6 +3885,8 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
+    { name = "reportlab", specifier = ">=4.0.0" },
+    { name = "resend", specifier = ">=2.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.0" },
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "uvicorn", specifier = ">=0.29.0" },
