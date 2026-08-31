@@ -107,6 +107,8 @@ class EmergencyInfo(BaseModel):
 
 
 class PhrasebookEntry(BaseModel):
+    """Regional travel phrasebook entry with English, native local script, and phonetic pronunciation guide."""
+
     phrase_english: str = Field(..., description="English phrase, e.g. 'Hello' or 'Thank you'")
     phrase_local: str = Field(..., description="Local language script phrase, e.g. 'నమస్కారం' or 'ధన్యవాదాలు'")
     pronunciation: str = Field(..., description="Phonetic pronunciation guide, e.g. 'Namaskaram'")
