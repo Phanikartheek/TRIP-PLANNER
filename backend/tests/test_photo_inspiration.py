@@ -4,8 +4,8 @@ Unit tests for Photo-Based Destination Inspiration (/api/inspire-from-photo).
 
 import json
 from unittest.mock import MagicMock, patch
-from fastapi.testclient import TestClient
 
+from fastapi.testclient import TestClient
 from trip_planner.api.app import app
 
 client = TestClient(app)
