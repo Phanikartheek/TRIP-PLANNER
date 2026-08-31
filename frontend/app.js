@@ -430,6 +430,7 @@ document.addEventListener('DOMContentLoaded', () => {
       food_preference: getSelectedFood(),
       travel_style: travelStyleSelect.value,
       language: languageSelect ? languageSelect.value : 'en',
+      travel_date: document.getElementById('travel_date') ? document.getElementById('travel_date').value || null : null,
     };
 
 
@@ -780,6 +781,22 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderItinerary(itinerary, userBudget, currencyCode) {
     if (!itinerary) return;
 
+    // Render Countdown Banner
+    const tDate = itinerary.travel_date || (currentJobData && currentJobData.travel_date);
+    const cBanner = document.getElementById('countdown-banner');
+    const cText = document.getElementById('countdown-text');
+    if (tDate && cBanner && cText) {
+      const today = new Date(); today.setHours(0,0,0,0);
+      const target = new Date(tDate); target.setHours(0,0,0,0);
+      const diffDays = Math.ceil((target - today) / 86400000);
+      if (diffDays > 0) cText.textContent = `🗓️ ${diffDays} day${diffDays === 1 ? '' : 's'} until your trip! (${tDate})`;
+      else if (diffDays === 0) cText.textContent = `✈️ Your trip starts today! (${tDate})`;
+      else cText.textContent = `✈️ Trip took place on ${tDate}`;
+      cBanner.style.display = 'block';
+    } else if (cBanner) {
+      cBanner.style.display = 'none';
+    }
+
     const city = itinerary.destination_city || 'Featured Destination';
     const country = itinerary.destination_country || (currentMode === 'domestic' ? 'India' : '');
     const totalCost = itinerary.total_estimated_cost || 0;
@@ -935,21 +952,52 @@ document.addEventListener('DOMContentLoaded', () => {
       daysTimeline.appendChild(dayCard);
     });
 
-    // Render Packing Suggestions
-    packingGrid.innerHTML = '';
-    packing.forEach((item, idx) => {
-      const itemEl = document.createElement('label');
-      itemEl.className = 'checklist-item';
-      itemEl.innerHTML = `
-        <input type="checkbox" id="pack-${idx}">
-        <span class="checklist-text">${escapeHtml(item)}</span>
-      `;
-      const checkbox = itemEl.querySelector('input');
-      checkbox.addEventListener('change', () => {
-        itemEl.classList.toggle('done', checkbox.checked);
+    // Render Packing Suggestions with API Persistence
+    const loadChecklist = async () => {
+      let checklistItems = [];
+      if (currentJobId) {
+        try {
+          const res = await fetch(`${API_BASE}/api/trip/${currentJobId}/checklist`);
+          if (res.ok) {
+            const data = await res.json();
+            checklistItems = data.checklist || [];
+          }
+        } catch (e) {
+          console.warn('Failed to fetch checklist state:', e);
+        }
+      }
+      if (!checklistItems || checklistItems.length === 0) {
+        checklistItems = (itinerary.packing_suggestions || []).map(item => ({ item, checked: false }));
+      }
+      packingGrid.innerHTML = '';
+      checklistItems.forEach((itemObj, idx) => {
+        const itemText = typeof itemObj === 'string' ? itemObj : itemObj.item;
+        const isChecked = typeof itemObj === 'object' && itemObj.checked;
+        const itemEl = document.createElement('label');
+        itemEl.className = `checklist-item${isChecked ? ' done' : ''}`;
+        itemEl.innerHTML = `
+          <input type="checkbox" id="pack-${idx}" ${isChecked ? 'checked' : ''}>
+          <span class="checklist-text">${escapeHtml(itemText)}</span>
+        `;
+        const checkbox = itemEl.querySelector('input');
+        checkbox.addEventListener('change', async () => {
+          itemEl.classList.toggle('done', checkbox.checked);
+          if (currentJobId) {
+            try {
+              await fetch(`${API_BASE}/api/trip/${currentJobId}/checklist`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ item: itemText, checked: checkbox.checked }),
+              });
+            } catch (err) {
+              console.error('Failed to update checklist item:', err);
+            }
+          }
+        });
+        packingGrid.appendChild(itemEl);
       });
-      packingGrid.appendChild(itemEl);
-    });
+    };
+    loadChecklist();
 
     // Render Recommended Stay
     const stayCard = document.getElementById('stay-card');
@@ -1004,6 +1052,51 @@ document.addEventListener('DOMContentLoaded', () => {
       if (upgradeTipText) upgradeTipText.innerHTML = `<strong>Concierge Advice:</strong> If you increase your budget by just <strong>+${formattedUpgradeAmt}</strong>, you unlock private rooms, iconic dining, and hassle-free transit in ${city}!`;
     }
     if (upgradeCard) upgradeCard.classList.remove('hidden');
+
+    // Render Similar Travelers Also Visited Recommendations
+    const loadRecommendations = async () => {
+      const recsSection = document.getElementById('recommendations-section');
+      const recsGrid = document.getElementById('recommendations-grid');
+      if (!recsSection || !recsGrid || !currentJobId) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/trip/${currentJobId}/recommendations`);
+        if (res.ok) {
+          const data = await res.json();
+          const recs = data.recommendations || [];
+          if (recs.length > 0) {
+            recsGrid.innerHTML = '';
+            recs.forEach(rec => {
+              const card = document.createElement('div');
+              card.className = 'recommendation-card';
+              card.style.cssText = 'background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 15px; display: flex; flex-direction: column; justify-content: space-between;';
+              
+              const highlights = (rec.theme_highlights || []).slice(0, 2).map(h => `<li>${escapeHtml(h)}</li>`).join('');
+              
+              card.innerHTML = `
+                <div>
+                  <h4 style="margin: 0 0 5px 0; color: #38bdf8;">📍 ${escapeHtml(rec.destination_city)}, ${escapeHtml(rec.destination_country)}</h4>
+                  <div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 8px;">
+                    ${rec.trip_length_days} Days | ${formatMoney(rec.total_estimated_cost, rec.currency)}
+                  </div>
+                  ${highlights ? `<ul style="margin: 5px 0 10px 18px; padding: 0; font-size: 0.82rem; color: #cbd5e1;">${highlights}</ul>` : ''}
+                </div>
+                <a href="/share.html?id=${rec.job_id}" target="_blank" rel="noopener" style="display: inline-block; background: rgba(56, 189, 248, 0.15); color: #38bdf8; text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; text-align: center; margin-top: 10px;">
+                  🔗 View Itinerary
+                </a>
+              `;
+              recsGrid.appendChild(card);
+            });
+            recsSection.style.display = 'block';
+          } else {
+            recsSection.style.display = 'none';
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch recommendations:', err);
+      }
+    };
+    loadRecommendations();
 
     // Show Results
     resultsSection.classList.add('active');

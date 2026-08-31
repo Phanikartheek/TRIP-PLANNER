@@ -267,6 +267,23 @@
             </div>
           </div>
 
+          <!-- Travel Date Input (Optional) -->
+          <div class="form-group">
+            <label for="travel_date" class="input-label">
+              Travel Date
+              <span class="input-hint">(Optional departure date for countdown & reminders)</span>
+            </label>
+            <div class="input-wrapper">
+              <span class="input-icon">📅</span>
+              <input 
+                type="date" 
+                id="travel_date" 
+                name="travel_date" 
+                class="form-input" 
+              >
+            </div>
+          </div>
+
         </div>
 
         <!-- Submit Button -->
@@ -338,6 +355,11 @@
     <!-- Itinerary Results Section -->
     <section class="glass-card results-card" id="results-section">
       
+      <!-- Live Countdown Banner -->
+      <div id="countdown-banner" class="countdown-banner" style="display: none; background: linear-gradient(135deg, #4f46e5, #0284c7); color: white; padding: 12px 20px; border-radius: 8px; font-weight: 600; margin-bottom: 20px; text-align: center;">
+        <span id="countdown-text"></span>
+      </div>
+
       <!-- Destination Showcase Banner -->
       <div class="dest-banner">
         <div class="dest-info">
@@ -438,6 +460,14 @@
         <div class="upgrade-summary-box">
           <span class="tip-icon">✨</span>
           <p id="upgrade-tip-text"><strong>Concierge Advice:</strong> Spending an extra ₹2,500 elevates your comfort level significantly with private rooms and signature dining!</p>
+        </div>
+      </div>
+
+      <!-- Similar Travelers Also Visited Recommendations Section -->
+      <div id="recommendations-section" class="recommendations-section" style="display: none; margin-top: 25px;">
+        <h3 class="section-heading">🌟 Similar Travelers Also Enjoyed</h3>
+        <div id="recommendations-grid" class="recommendations-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 15px;">
+          <!-- Recommendation cards populated dynamically -->
         </div>
       </div>
 
