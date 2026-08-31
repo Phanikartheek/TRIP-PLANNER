@@ -124,6 +124,8 @@ class LocalEvent(BaseModel):
 
 
 class EtiquetteItem(BaseModel):
+    """Region-specific cultural etiquette and customs advice item."""
+
     category: str = Field(
         ...,
         description="Etiquette area, e.g. 'Temple Dress Code', 'Footwear Rules', 'Tipping Norms', 'Photography Restrictions', 'Greeting Custom'",
