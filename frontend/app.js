@@ -431,6 +431,7 @@ document.addEventListener('DOMContentLoaded', () => {
       travel_style: travelStyleSelect.value,
       language: languageSelect ? languageSelect.value : 'en',
       travel_date: document.getElementById('travel_date') ? document.getElementById('travel_date').value || null : null,
+      multi_city: document.getElementById('multi_city') ? document.getElementById('multi_city').checked : false,
     };
 
 
@@ -797,6 +798,16 @@ document.addEventListener('DOMContentLoaded', () => {
       cBanner.style.display = 'none';
     }
 
+    // Render Budget Overrun Alert Banner
+    const bBanner = document.getElementById('budget-alert-banner');
+    const bText = document.getElementById('budget-alert-text');
+    if (itinerary.budget_alert && bBanner && bText) {
+      bText.textContent = `⚠️ ${itinerary.budget_alert}`;
+      bBanner.style.display = 'block';
+    } else if (bBanner) {
+      bBanner.style.display = 'none';
+    }
+
     const city = itinerary.destination_city || 'Featured Destination';
     const country = itinerary.destination_country || (currentMode === 'domestic' ? 'India' : '');
     const totalCost = itinerary.total_estimated_cost || 0;
@@ -805,7 +816,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const activeCurrency = itinerary.currency || currencyCode || currentCurrency;
     const transportAdvice = itinerary.local_transport_advice || [];
 
-    destCity.textContent = city;
+    if (itinerary.cities_visited && itinerary.cities_visited.length > 1) {
+      destCity.textContent = `${city} (Route: ${itinerary.cities_visited.join(' ➔ ')})`;
+    } else {
+      destCity.textContent = city;
+    }
     destCountry.innerHTML = `📍 ${country ? country : 'India'}`;
     totalCostBadge.textContent = formatMoney(totalCost, activeCurrency);
 
@@ -914,6 +929,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="day-tag-title">
             <span class="day-num-pill">Day ${dayNum}</span>
             <span class="day-theme-text">${escapeHtml(theme)}</span>
+            ${day.city ? `<span class="day-city-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 6px;">📍 ${escapeHtml(day.city)}</span>` : ''}
           </div>
           <div class="day-meta">
             ${costTagHtml}

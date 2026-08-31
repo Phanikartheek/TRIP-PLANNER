@@ -170,7 +170,13 @@
                 required
               >
             </div>
-            <div class="input-subtext">The agent will research weather, connectivity, and pick the best single destination.</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+              <div class="input-subtext" style="margin-top:0;">The agent will research weather, connectivity, and pick the best destination.</div>
+              <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; color: #38bdf8; font-weight: 600; cursor: pointer; white-space: nowrap;">
+                <input type="checkbox" id="multi_city" name="multi_city" style="accent-color: #0284c7; width: 15px; height: 15px;">
+                <span>Multi-City Route? (Sequence in order)</span>
+              </label>
+            </div>
           </div>
 
           <!-- Interests & Vibes -->
@@ -387,6 +393,11 @@
     <!-- Itinerary Results Section -->
     <section class="glass-card results-card" id="results-section">
       
+      <!-- Budget-Overrun Alert Warning Banner -->
+      <div id="budget-alert-banner" class="budget-alert-banner" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; padding: 14px 20px; border-radius: 8px; font-weight: 600; margin-bottom: 20px; text-align: center; font-size: 0.95rem;">
+        <span id="budget-alert-text"></span>
+      </div>
+
       <!-- Live Countdown Banner -->
       <div id="countdown-banner" class="countdown-banner" style="display: none; background: linear-gradient(135deg, #4f46e5, #0284c7); color: white; padding: 12px 20px; border-radius: 8px; font-weight: 600; margin-bottom: 20px; text-align: center;">
         <span id="countdown-text"></span>

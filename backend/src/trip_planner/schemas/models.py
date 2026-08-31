@@ -38,6 +38,7 @@ class TripPlanRequest(BaseModel):
     travel_mode: str | None = Field(default="domestic", description="Travel mode (domestic vs international)")
     language: str = Field(default="en", description="Output language code: 'en', 'te', or 'hi'")
     travel_date: str | None = Field(default=None, description="Optional ISO date of travel (YYYY-MM-DD)")
+    multi_city: bool = Field(default=False, description="Whether this is a multi-city routed trip")
 
     @field_validator("language")
     @classmethod
@@ -48,7 +49,10 @@ class TripPlanRequest(BaseModel):
 class CitySelection(BaseModel):
     """Output of the City Selection Expert."""
 
-    city: str = Field(..., description="The chosen city for the trip")
+    city: str = Field(..., description="The chosen primary city for the trip")
+    cities_visited: list[str] | None = Field(
+        default=None, description="Ordered list of cities visited in a multi-city trip"
+    )
     country: str = Field(..., description="Country the city is in")
     reasoning: str = Field(
         ..., description="Why this city fits the traveler's criteria"
@@ -129,6 +133,10 @@ class ItineraryDay(BaseModel):
         default=None,
         description="Numeric rain probability percentage (0-100)",
     )
+    city: str | None = Field(
+        default=None,
+        description="City for this specific day in a multi-city trip",
+    )
 
     @field_validator("morning", "afternoon", "evening", mode="before")
     @classmethod
@@ -182,6 +190,9 @@ class TripItinerary(BaseModel):
     """Final output of the Travel Concierge — the end deliverable."""
 
     destination_city: str
+    cities_visited: list[str] | None = Field(
+        default=None, description="Ordered list of cities visited in a multi-city itinerary"
+    )
     destination_country: str
     trip_length_days: int
     currency: str = Field(
@@ -206,6 +217,9 @@ class TripItinerary(BaseModel):
     )
     budget_upgrade_insights: SmartBudgetUpgrade | None = Field(
         default=None, description="Suggestions for what extra luxury/attractions unlock if user spends ₹2,000–₹3,000 more"
+    )
+    budget_alert: str | None = Field(
+        default=None, description="Budget-overrun warning message if a revision increased total cost"
     )
 
     @model_validator(mode="after")

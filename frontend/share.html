@@ -45,8 +45,11 @@
     </div>
 
     <!-- Main Shared Results Container -->
-    <section class="glass-card results-card hidden" id="share-results-card" style="display: none;">
-      <!-- Destination Banner -->
+      <!-- Budget-Overrun Alert Warning Banner -->
+      <div id="share-budget-alert-banner" class="budget-alert-banner" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; padding: 14px 20px; border-radius: 8px; font-weight: 600; margin-bottom: 20px; text-align: center; font-size: 0.95rem;">
+        <span id="share-budget-alert-text"></span>
+      </div>
+
       <!-- Live Countdown Banner -->
       <div id="share-countdown-banner" class="countdown-banner" style="display: none; background: linear-gradient(135deg, #4f46e5, #0284c7); color: white; padding: 12px 20px; border-radius: 8px; font-weight: 600; margin-bottom: 20px; text-align: center;">
         <span id="share-countdown-text"></span>
@@ -154,7 +157,21 @@
           return `${sym}${Math.round(amt || 0).toLocaleString()}`;
         }
 
-        document.getElementById('share-dest-city').textContent = itinerary.destination_city || 'Shared Trip';
+        // Budget Alert Banner
+        if (itinerary.budget_alert) {
+          const bBanner = document.getElementById('share-budget-alert-banner');
+          const bText = document.getElementById('share-budget-alert-text');
+          if (bBanner && bText) {
+            bText.textContent = `⚠️ ${itinerary.budget_alert}`;
+            bBanner.style.display = 'block';
+          }
+        }
+
+        const cityText = (itinerary.cities_visited && itinerary.cities_visited.length > 1) 
+          ? `${itinerary.destination_city || 'Shared Trip'} (Route: ${itinerary.cities_visited.join(' ➔ ')})`
+          : (itinerary.destination_city || 'Shared Trip');
+
+        document.getElementById('share-dest-city').textContent = cityText;
         document.getElementById('share-dest-country').textContent = (itinerary.destination_country || 'INDIA').toUpperCase();
         document.getElementById('share-days-val').textContent = `${itinerary.trip_length_days || 0} Days`;
         document.getElementById('share-cost-val').textContent = fmt(itinerary.total_estimated_cost);
@@ -226,6 +243,7 @@
               <div class="day-title-group">
                 <span class="day-badge">Day ${dayNum}</span>
                 <h4 class="day-theme">${escapeHtml(theme)}</h4>
+                ${day.city ? `<span class="day-city-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 6px;">📍 ${escapeHtml(day.city)}</span>` : ''}
               </div>
               <div class="day-meta">${costBadgeHtml}</div>
             </div>

@@ -5,16 +5,20 @@ select_city_task:
     {interests} and a total budget of {budget}. Search the web for
     current weather/seasonal conditions (including Indian seasons/monsoons where applicable)
     and typical daily costs in the traveler's stated budget currency for each candidate before deciding.
-    Pick exactly one city and justify the choice with specific insights.
+    
+    MULTI-CITY ROUTING INSTRUCTIONS:
+    If multiple candidate cities are listed in {cities} for a multi-city trip, sequence ALL listed cities into an ordered travel route (e.g. ["Goa", "Gokarna"]).
+    Set `city` to the FIRST city in the route (e.g. "Goa"), and set `cities_visited` to the full ordered list of cities (e.g. ["Goa", "Gokarna"]).
+    If only one candidate city is specified, set `city` to that city and `cities_visited` to null.
   expected_output: >-
-    A single recommended city with its country, a clear justification
+    A single recommended primary city with its country, a clear justification
     referencing the traveler's interests and budget, the best time/season to
-    visit, the currency code, and an estimated daily budget.
+    visit, the currency code, an estimated daily budget, and cities_visited if multi-city.
   agent: city_selector
 
 gather_city_info_task:
   description: >-
-    For the city chosen in the previous task, research and compile:
+    For the city/cities chosen in the previous task, research and compile:
     the top attractions matched to the traveler's interests ({interests}),
     notable local food/restaurants (including regional specialties and dietary preferences),
     safety notes a visitor should know, and practical transportation tips (airport/railway station transfers,
@@ -37,6 +41,14 @@ plan_itinerary_task:
     ALWAYS specify real, famous, iconic spots by name (e.g., exact well-known restaurants with must-try signature dishes, trending cafes, popular shopping malls/cinemas, and scenic landmarks) rather than generic descriptions.
     CONCISE WRITING STYLE & TOKEN BOUNDS: Keep morning, afternoon, and evening descriptions crisp, engaging, and concise (under 80 words per time slot). Avoid overly verbose bulleted lists within a single field so that the JSON tool call remains compact and fully valid.
     For EACH day, provide an itemized line-item expense breakdown in cost_breakdown (e.g. [{"item": "Cab fare to temple", "amount": 400}, {"item": "Lunch at Babai Hotel", "amount": 350}]) that sums to that day's estimated_cost.
+    
+    MULTI-CITY ITINERARY & TRANSIT ROUTING:
+    If multiple cities are being visited:
+    1. Logically sequence all visited cities across the {trip_length} days without unnecessary backtracking.
+    2. Allocate a sensible number of days per city given the overall trip duration of {trip_length} days.
+    3. On transition days between cities, include inter-city transit (train, bus, or cab/flight details and fares) as part of that transition day's morning/afternoon plan and cost breakdown.
+    4. For EACH day in `days`, set the `city` field on `ItineraryDay` to the specific city visited on that day (e.g. Day 1 city: "Goa", Day 2 city: "Goa", Day 3 city: "Gokarna", Day 4 city: "Gokarna").
+    5. Set `destination_city` to the FIRST city visited, and `cities_visited` to the full list of visited cities (e.g. ["Goa", "Gokarna"]).
     
     GROUP TRIP SIZE & TRAVELERS:
     This trip is planned for {travelers} traveler(s).
