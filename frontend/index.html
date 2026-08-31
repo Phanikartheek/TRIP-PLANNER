@@ -131,12 +131,33 @@
             </div>
           </div>
 
-          <!-- Candidate Cities -->
-          <div class="form-group">
-            <label for="cities" class="input-label">
-              Candidate Destinations
-              <span class="input-hint">(Cities for AI to evaluate)</span>
-            </label>
+          <!-- Target Cities / Destinations -->
+          <div class="form-group form-group-full">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <label for="cities" class="input-label" style="margin-bottom: 0;">
+                Target Destination(s)
+                <span class="input-hint">(Enter candidate cities/regions to evaluate)</span>
+              </label>
+              <button type="button" id="btn-photo-inspire" class="btn-secondary" style="padding: 4px 10px; font-size: 0.82rem; background: linear-gradient(135deg, #0284c7, #4f46e5); color: white; border: none; border-radius: 6px; cursor: pointer;">
+                📷 Get inspired by a photo
+              </button>
+              <input type="file" id="photo-upload-input" accept="image/*" style="display: none;">
+            </div>
+            
+            <div id="photo-inspire-card" style="display: none; margin-bottom: 12px; background: rgba(2, 132, 199, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 12px;">
+              <div id="photo-inspire-loading" style="display: none; font-size: 0.88rem; color: #38bdf8;">
+                <div class="spinner" style="display: inline-block; width: 14px; height: 14px; border-width: 2px; margin-right: 6px;"></div>
+                Analyzing photo with AI vision...
+              </div>
+              <div id="photo-inspire-content" style="display: none;">
+                <div style="font-size: 0.85rem; font-weight: 600; color: #38bdf8; margin-bottom: 4px;">📷 Photo Scene Detected:</div>
+                <div id="photo-scene-text" style="font-size: 0.83rem; color: #e2e8f0; margin-bottom: 6px;"></div>
+                <div style="font-size: 0.82rem; color: #94a3b8; margin-bottom: 8px;" id="photo-reasoning-text"></div>
+                <div style="font-size: 0.83rem; font-weight: 600; color: #f59e0b; margin-bottom: 6px;">✨ Click to pre-fill destination:</div>
+                <div id="photo-chips-container" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+              </div>
+            </div>
+
             <div class="input-wrapper">
               <span class="input-icon">🗺️</span>
               <input 
@@ -154,10 +175,21 @@
 
           <!-- Interests & Vibes -->
           <div class="form-group form-group-full">
-            <label for="interests" class="input-label">
-              Interests & Travel Vibes
-              <span class="input-hint">(Select tags or enter custom preferences)</span>
-            </label>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <label for="interests" class="input-label" style="margin-bottom: 0;">
+                Interests & Travel Vibes
+                <span class="input-hint">(Select tags, enter text, or use voice)</span>
+              </label>
+              <button type="button" id="btn-voice-record" class="btn-secondary" style="padding: 4px 10px; font-size: 0.82rem; background: linear-gradient(135deg, #059669, #0d9488); color: white; border: none; border-radius: 6px; cursor: pointer;">
+                🎙️ Speak Preferences
+              </button>
+            </div>
+            
+            <div id="voice-recording-status" style="display: none; font-size: 0.85rem; font-weight: 600; color: #ef4444; margin-bottom: 8px; padding: 6px 12px; background: rgba(239, 68, 68, 0.15); border-radius: 6px; align-items: center; gap: 8px;">
+              <span style="display: inline-block; width: 10px; height: 10px; background: #ef4444; border-radius: 50%; animation: pulse 1s infinite;"></span>
+              <span id="voice-status-text">Recording audio... Speak now. Click mic button again to finish.</span>
+            </div>
+
             <div class="input-wrapper">
               <span class="input-icon">🎨</span>
               <input 

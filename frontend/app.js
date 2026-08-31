@@ -1185,6 +1185,167 @@ document.addEventListener('DOMContentLoaded', () => {
     return md;
   }
 
+  // --- Voice Input (Speech-to-Text via Groq Whisper) ---
+  const btnVoiceRecord = document.getElementById('btn-voice-record');
+  const voiceStatusContainer = document.getElementById('voice-recording-status');
+  const voiceStatusText = document.getElementById('voice-status-text');
+  let mediaRecorder = null;
+  let audioChunks = [];
+  let isRecording = false;
+
+  if (btnVoiceRecord) {
+    btnVoiceRecord.addEventListener('click', async () => {
+      if (isRecording) {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+        return;
+      }
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showToast('❌ Microphone recording is not supported in this browser.');
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunks = [];
+        mediaRecorder = new MediaRecorder(stream);
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+          stream.getTracks().forEach(t => t.stop());
+          isRecording = false;
+          btnVoiceRecord.textContent = '🎙️ Speak Preferences';
+          btnVoiceRecord.style.background = 'linear-gradient(135deg, #059669, #0d9488)';
+
+          if (voiceStatusText) voiceStatusText.textContent = 'Transcribing audio... Please wait.';
+          showToast('⏳ Transcribing audio with Groq Whisper...');
+
+          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          const formData = new FormData();
+          formData.append('file', audioBlob, 'voice_input.webm');
+
+          try {
+            const res = await fetch(`${API_BASE}/api/transcribe-audio`, {
+              method: 'POST',
+              body: formData,
+            });
+
+            if (!res.ok) {
+              const errData = await res.json().catch(() => ({}));
+              throw new Error(errData.detail || 'Audio transcription failed');
+            }
+
+            const data = await res.json();
+            if (data.transcript) {
+              if (interestsInput.value.trim()) {
+                interestsInput.value = `${interestsInput.value.trim()}, ${data.transcript}`;
+              } else {
+                interestsInput.value = data.transcript;
+              }
+              showToast('✅ Audio transcribed successfully!');
+            } else {
+              showToast('⚠️ No speech detected in audio clip.');
+            }
+          } catch (err) {
+            console.error('Transcription error:', err);
+            showToast(`❌ ${err.message || 'Voice transcription failed'}`);
+          } finally {
+            if (voiceStatusContainer) voiceStatusContainer.style.display = 'none';
+          }
+        };
+
+        mediaRecorder.start();
+        isRecording = true;
+        btnVoiceRecord.textContent = '⏹️ Stop Recording';
+        btnVoiceRecord.style.background = '#ef4444';
+        if (voiceStatusText) voiceStatusText.textContent = 'Recording audio... Speak now. Click button again to stop.';
+        if (voiceStatusContainer) voiceStatusContainer.style.display = 'flex';
+
+      } catch (err) {
+        console.error('Microphone permission error:', err);
+        showToast('❌ Microphone permission denied or unavailable.');
+        if (voiceStatusContainer) voiceStatusContainer.style.display = 'none';
+      }
+    });
+  }
+
+  // --- Photo-based Destination Inspiration ---
+  const btnPhotoInspire = document.getElementById('btn-photo-inspire');
+  const photoUploadInput = document.getElementById('photo-upload-input');
+  const photoCard = document.getElementById('photo-inspire-card');
+  const photoLoading = document.getElementById('photo-inspire-loading');
+  const photoContent = document.getElementById('photo-inspire-content');
+  const photoSceneText = document.getElementById('photo-scene-text');
+  const photoReasoningText = document.getElementById('photo-reasoning-text');
+  const photoChipsContainer = document.getElementById('photo-chips-container');
+
+  if (btnPhotoInspire && photoUploadInput) {
+    btnPhotoInspire.addEventListener('click', () => {
+      photoUploadInput.click();
+    });
+
+    photoUploadInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      if (photoCard) photoCard.style.display = 'block';
+      if (photoLoading) photoLoading.style.display = 'block';
+      if (photoContent) photoContent.style.display = 'none';
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch(`${API_BASE}/api/inspire-from-photo`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || 'Photo analysis failed');
+        }
+
+        const data = await res.json();
+        if (photoSceneText) photoSceneText.textContent = data.detected_scene || 'Scene analyzed';
+        if (photoReasoningText) photoReasoningText.textContent = data.reasoning || '';
+
+        if (photoChipsContainer) {
+          photoChipsContainer.innerHTML = '';
+          (data.suggested_destinations || []).forEach(city => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'interest-tag active';
+            chip.style.cssText = 'background: #0284c7; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600;';
+            chip.textContent = `📍 ${city}`;
+            chip.addEventListener('click', () => {
+              if (citiesInput) {
+                citiesInput.value = city;
+                showToast(`✨ Destination pre-filled with ${city}!`);
+              }
+            });
+            photoChipsContainer.appendChild(chip);
+          });
+        }
+
+        if (photoLoading) photoLoading.style.display = 'none';
+        if (photoContent) photoContent.style.display = 'block';
+        showToast('📷 Photo analyzed successfully!');
+      } catch (err) {
+        console.error('Photo inspiration error:', err);
+        showToast(`❌ ${err.message || 'Photo analysis failed'}`);
+        if (photoCard) photoCard.style.display = 'none';
+      } finally {
+        photoUploadInput.value = '';
+      }
+    });
+  }
+
   // --- Helper: Toast Notification ---
   function showToast(msg) {
     const toast = document.createElement('div');

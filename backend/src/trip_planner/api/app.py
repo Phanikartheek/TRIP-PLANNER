@@ -17,7 +17,7 @@ from typing import Any
 import resend
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -1116,6 +1116,153 @@ async def get_trip_recommendations_endpoint(job_id: str):
     recs = [c["data"] for c in candidates[:3]]
 
     return {"job_id": job_id, "recommendations": recs}
+
+
+@app.post("/api/transcribe-audio")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Transcribes uploaded audio file to text using Groq Whisper API."""
+    allowed_types = {
+        "audio/webm", "audio/mp3", "audio/mpeg", "audio/wav", "audio/x-wav",
+        "audio/m4a", "audio/ogg", "audio/x-m4a", "audio/flac"
+    }
+    allowed_exts = {".webm", ".mp3", ".wav", ".m4a", ".ogg", ".flac"}
+
+    file_ext = Path(file.filename or "").suffix.lower()
+    content_type = (file.content_type or "").lower()
+
+    if file_ext not in allowed_exts and content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file type. Please upload a valid audio file (webm, mp3, wav, m4a, ogg).",
+        )
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Empty audio file uploaded.")
+
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY is not configured.")
+
+    try:
+        import requests
+
+        files = {
+            "file": (file.filename or "audio.webm", contents, content_type or "audio/webm")
+        }
+        data = {
+            "model": "whisper-large-v3",
+            "response_format": "json",
+        }
+        headers = {"Authorization": f"Bearer {api_key}"}
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers=headers,
+            files=files,
+            data=data,
+            timeout=60,
+        )
+        if resp.status_code != 200:
+            logger.error("Groq Whisper API error %d: %s", resp.status_code, resp.text)
+            raise HTTPException(status_code=500, detail=f"Audio transcription failed: {resp.text}")
+
+        result = resp.json()
+        transcript = result.get("text", "").strip()
+        return {"transcript": transcript}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to transcribe audio: %s", str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Transcription service error: {str(e)}")
+
+
+@app.post("/api/inspire-from-photo")
+async def inspire_from_photo(file: UploadFile = File(...)):
+    """Analyzes an uploaded photo using Groq vision to suggest matching Indian destinations."""
+    allowed_types = {
+        "image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"
+    }
+    allowed_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+    file_ext = Path(file.filename or "").suffix.lower()
+    content_type = (file.content_type or "").lower()
+
+    if file_ext not in allowed_exts and content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file type. Please upload a valid image file (jpg, png, webp, gif).",
+        )
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Empty image file uploaded.")
+
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY is not configured.")
+
+    try:
+        import base64
+
+        import requests
+
+        mime = content_type if content_type in allowed_types else "image/jpeg"
+        img_b64 = base64.b64encode(contents).decode("utf-8")
+        data_url = f"data:{mime};base64,{img_b64}"
+
+        prompt = (
+            "Analyze this photo carefully. Describe what scene/vibe is visually depicted in the photo. "
+            "Suggest 2-3 Indian travel destinations (city/place names in India) that offer a similar vibe or landscape. "
+            "IMPORTANT: Always suggest Indian destinations regardless of where the photo was taken (e.g. if the photo shows the Eiffel Tower, suggest Indian places with similar architectural or romantic vibes like Puducherry, Jaipur, or Udaipur, and explicitly note in your reasoning that you mapped the non-Indian scene to Indian equivalents per Phase 1 scope).\n\n"
+            "Return valid JSON ONLY with exact keys:\n"
+            "{\n"
+            '  "detected_scene": "brief description of what is in the photo",\n'
+            '  "suggested_destinations": ["City 1", "City 2"],\n'
+            '  "reasoning": "explanation of why these Indian destinations match the photo"\n'
+            "}"
+        )
+
+        payload = {
+            "model": "qwen/qwen3.8-27b",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                }
+            ],
+            "temperature": 0.2,
+        }
+        headers = {"Authorization": f"Bearer {api_key}"}
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=60,
+        )
+        if resp.status_code != 200:
+            logger.error("Groq Vision API error %d: %s", resp.status_code, resp.text)
+            raise HTTPException(status_code=500, detail=f"Image analysis failed: {resp.text}")
+
+        raw_content = resp.json()["choices"][0]["message"]["content"].strip()
+        cleaned_json = raw_content
+        if "```" in cleaned_json:
+            cleaned_json = re.sub(r"^```[a-zA-Z]*\n", "", cleaned_json)
+            cleaned_json = re.sub(r"\n```$", "", cleaned_json).strip()
+
+        data = json.loads(cleaned_json)
+        return {
+            "detected_scene": data.get("detected_scene", "Visual scene analyzed"),
+            "suggested_destinations": data.get("suggested_destinations", []),
+            "reasoning": data.get("reasoning", ""),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to analyze image: %s", str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Vision service error: {str(e)}")
 
 
 @app.get("/")
