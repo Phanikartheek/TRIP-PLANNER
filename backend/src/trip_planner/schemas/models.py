@@ -37,6 +37,7 @@ class TripPlanRequest(BaseModel):
     travelers: int = Field(default=1, ge=1, le=20, description="Number of travelers for group trip cost splitting")
     travel_mode: str | None = Field(default="domestic", description="Travel mode (domestic vs international)")
     language: str = Field(default="en", description="Output language code: 'en', 'te', or 'hi'")
+    travel_date: str | None = Field(default=None, description="Optional ISO date of travel (YYYY-MM-DD)")
 
     @field_validator("language")
     @classmethod
@@ -123,6 +124,10 @@ class ItineraryDay(BaseModel):
     weather_note: str | None = Field(
         default=None,
         description="Weather note for the day, e.g. 'Rain likely (70%) - indoor plan recommended'",
+    )
+    rain_probability: float | int | None = Field(
+        default=None,
+        description="Numeric rain probability percentage (0-100)",
     )
 
     @field_validator("morning", "afternoon", "evening", mode="before")
