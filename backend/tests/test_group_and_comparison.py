@@ -159,6 +159,60 @@ def test_compare_trips_endpoint_success():
     assert c2["weather_summary"] == "Mostly clear / pleasant"
 
 
+def test_compare_trips_weather_summary_threshold():
+    """
+    Unit test ensuring low rain probability (<=50%) with a weather_note mentioning 'rain'
+    (e.g., 'Clear skies (22% rain)') is NOT counted as a rain day in weather_summary.
+    """
+    db.init_db()
+
+    job1_result = {
+        "destination_city": "Visakhapatnam",
+        "destination_country": "India",
+        "trip_length_days": 2,
+        "currency": "INR",
+        "travelers": 2,
+        "total_estimated_cost": 12000.0,
+        "days": [
+            {"day_number": 1, "weather_note": "Rain likely (71%) - indoor museum plan"},
+            {"day_number": 2, "weather_note": "Clear skies (22% rain) - ideal for outdoor beach walks"},
+        ],
+    }
+
+    job2_result = {
+        "destination_city": "Hyderabad",
+        "destination_country": "India",
+        "trip_length_days": 2,
+        "currency": "INR",
+        "travelers": 2,
+        "total_estimated_cost": 10000.0,
+        "days": [
+            {"day_number": 1, "weather_note": "Clear skies", "rain_probability": 10},
+            {"day_number": 2, "weather_note": "Sunny", "rain_probability": 15},
+        ],
+    }
+
+    db.create_job("comp-threshold-1", "plan", status="pending")
+    db.update_job("comp-threshold-1", status="complete", result=job1_result)
+
+    db.create_job("comp-threshold-2", "plan", status="pending")
+    db.update_job("comp-threshold-2", status="complete", result=job2_result)
+
+    resp = client.post("/api/compare-trips", json={"job_ids": ["comp-threshold-1", "comp-threshold-2"]})
+    assert resp.status_code == 200
+    data = resp.json()
+
+    comp_list = data["comparison"]
+    c1 = comp_list[0]
+    assert c1["destination_city"] == "Visakhapatnam"
+    # Day 1 is 71% (>50%), Day 2 is 22% (<=50%) -> 1 of 2 days!
+    assert c1["weather_summary"] == "Rain likely on 1 of 2 days"
+
+    c2 = comp_list[1]
+    assert c2["destination_city"] == "Hyderabad"
+    assert c2["weather_summary"] == "Mostly clear / pleasant"
+
+
 def test_trip_job_completes_when_weather_api_fails():
     """
     CRITICAL END-TO-END RESILIENCE TEST:

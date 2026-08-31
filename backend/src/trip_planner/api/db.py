@@ -36,12 +36,18 @@ def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
         );
     """)
 
-    # Check if user_email column exists on pre-existing jobs table
+    # Check if extra columns exist on pre-existing jobs table
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(jobs);")
     columns = [col["name"] for col in cursor.fetchall()]
     if "user_email" not in columns:
         conn.execute("ALTER TABLE jobs ADD COLUMN user_email TEXT;")
+    if "checklist_state" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN checklist_state TEXT;")
+    if "travel_date" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN travel_date TEXT;")
+    if "reminder_sent" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN reminder_sent INTEGER NOT NULL DEFAULT 0;")
 
     # Table 2: Users
     conn.execute("""
@@ -205,21 +211,23 @@ def create_job(
     status: str = "pending",
     parent_job_id: str | None = None,
     user_email: str | None = None,
+    travel_date: str | None = None,
     db_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """
-    Inserts or replaces a job record, optionally associating user_email.
+    Inserts or replaces a job record, optionally associating user_email and travel_date.
     """
     now = time.time()
     clean_email = user_email.strip().lower() if user_email else None
+    clean_travel_date = travel_date.strip() if travel_date else None
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT OR REPLACE INTO jobs (job_id, status, result, error, created_at, job_type, qa_history, parent_job_id, user_email)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            INSERT OR REPLACE INTO jobs (job_id, status, result, error, created_at, job_type, qa_history, parent_job_id, user_email, checklist_state, travel_date, reminder_sent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
-            (job_id, status, None, None, now, job_type, json.dumps([]), parent_job_id, clean_email),
+            (job_id, status, None, None, now, job_type, json.dumps([]), parent_job_id, clean_email, None, clean_travel_date, 0),
         )
         conn.commit()
     return {
@@ -232,6 +240,9 @@ def create_job(
         "qa_history": [],
         "parent_job_id": parent_job_id,
         "user_email": clean_email,
+        "checklist_state": None,
+        "travel_date": clean_travel_date,
+        "reminder_sent": False,
     }
 
 
@@ -246,8 +257,14 @@ def get_job(job_id: str, db_path: Path | str | None = None) -> dict[str, Any] | 
         if not row:
             return None
 
+        keys = row.keys()
         result_data = json.loads(row["result"]) if row["result"] else None
         qa_history_data = json.loads(row["qa_history"]) if row["qa_history"] else []
+        checklist_data = json.loads(row["checklist_state"]) if "checklist_state" in keys and row["checklist_state"] else None
+
+        # Auto-initialize checklist from result packing_suggestions if NULL
+        if checklist_data is None and result_data and isinstance(result_data, dict) and "packing_suggestions" in result_data:
+            checklist_data = [{"item": str(s), "checked": False} for s in (result_data.get("packing_suggestions") or [])]
 
         return {
             "job_id": row["job_id"],
@@ -258,7 +275,10 @@ def get_job(job_id: str, db_path: Path | str | None = None) -> dict[str, Any] | 
             "job_type": row["job_type"],
             "qa_history": qa_history_data,
             "parent_job_id": row["parent_job_id"],
-            "user_email": row["user_email"] if "user_email" in row.keys() else None,
+            "user_email": row["user_email"] if "user_email" in keys else None,
+            "checklist_state": checklist_data,
+            "travel_date": row["travel_date"] if "travel_date" in keys else None,
+            "reminder_sent": bool(row["reminder_sent"]) if "reminder_sent" in keys and row["reminder_sent"] is not None else False,
         }
 
 
@@ -297,6 +317,9 @@ def update_job(
     result: dict[str, Any] | None = None,
     error: str | None = None,
     qa_history: list[Any] | None = None,
+    checklist_state: list[dict[str, Any]] | None = None,
+    travel_date: str | None = None,
+    reminder_sent: bool | None = None,
     db_path: Path | str | None = None,
 ) -> None:
     """
@@ -311,12 +334,24 @@ def update_job(
     if result is not None:
         updates.append("result = ?")
         params.append(json.dumps(result))
+        # Automatically initialize checklist_state if packing_suggestions present and checklist_state not explicitly given
+        if checklist_state is None and isinstance(result, dict) and "packing_suggestions" in result:
+            checklist_state = [{"item": str(s), "checked": False} for s in (result.get("packing_suggestions") or [])]
     if error is not None:
         updates.append("error = ?")
         params.append(error)
     if qa_history is not None:
         updates.append("qa_history = ?")
         params.append(json.dumps(qa_history))
+    if checklist_state is not None:
+        updates.append("checklist_state = ?")
+        params.append(json.dumps(checklist_state))
+    if travel_date is not None:
+        updates.append("travel_date = ?")
+        params.append(travel_date)
+    if reminder_sent is not None:
+        updates.append("reminder_sent = ?")
+        params.append(1 if reminder_sent else 0)
 
     if not updates:
         return
@@ -328,6 +363,36 @@ def update_job(
         cursor = conn.cursor()
         cursor.execute(query, tuple(params))
         conn.commit()
+
+
+def get_checklist(job_id: str, db_path: Path | str | None = None) -> list[dict[str, Any]]:
+    """Retrieves current checklist state for a job, initializing from packing_suggestions if needed."""
+    job = get_job(job_id, db_path=db_path)
+    if not job:
+        return []
+    if job.get("checklist_state") is not None:
+        return job["checklist_state"]
+    result_data = job.get("result") or {}
+    suggestions = result_data.get("packing_suggestions") or []
+    checklist = [{"item": str(s), "checked": False} for s in suggestions]
+    update_job(job_id, checklist_state=checklist, db_path=db_path)
+    return checklist
+
+
+def update_checklist_item(job_id: str, item: str, checked: bool, db_path: Path | str | None = None) -> list[dict[str, Any]]:
+    """Updates a single checklist item state in DB for a job and returns the full updated checklist."""
+    checklist = get_checklist(job_id, db_path=db_path)
+    found = False
+    for el in checklist:
+        if el.get("item") == item:
+            el["checked"] = bool(checked)
+            found = True
+            break
+    if not found:
+        checklist.append({"item": item, "checked": bool(checked)})
+
+    update_job(job_id, checklist_state=checklist, db_path=db_path)
+    return checklist
 
 
 def get_root_job(job_id: str, db_path: Path | str | None = None) -> dict[str, Any] | None:
