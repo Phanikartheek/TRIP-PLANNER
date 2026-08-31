@@ -224,11 +224,23 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
     else:
         out_dict = {"raw_output": str(result)}
 
-    if isinstance(out_dict, dict) and "travelers" in inputs:
-        req_travelers = int(inputs.get("travelers", 1))
-        out_dict["travelers"] = req_travelers
-        tot_cost = float(out_dict.get("total_estimated_cost", 0.0))
-        out_dict["cost_per_person"] = round(tot_cost / max(1, req_travelers), 2)
+    if isinstance(out_dict, dict):
+        if "travelers" in inputs:
+            req_travelers = int(inputs.get("travelers", 1))
+            out_dict["travelers"] = req_travelers
+            tot_cost = float(out_dict.get("total_estimated_cost", 0.0))
+            out_dict["cost_per_person"] = round(tot_cost / max(1, req_travelers), 2)
+
+        # Multi-city normalization & backward compatibility
+        is_multi = bool(inputs.get("multi_city"))
+        raw_cities = [c.strip() for c in str(inputs.get("cities", "")).split(",") if c.strip()]
+        if is_multi or (len(raw_cities) > 1 and out_dict.get("cities_visited")):
+            if not out_dict.get("cities_visited"):
+                out_dict["cities_visited"] = raw_cities
+            if out_dict.get("cities_visited") and len(out_dict["cities_visited"]) > 0:
+                out_dict["destination_city"] = out_dict["cities_visited"][0]
+        else:
+            out_dict["cities_visited"] = None
 
     return out_dict
 
@@ -267,10 +279,30 @@ async def _execute_trip_job(job_id: str, inputs: dict[str, Any]) -> None:
 async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
     """
     Background worker task running the single-agent revision task and storing results.
+    Computes deterministic budget-overrun alert when revised cost exceeds original cost.
     """
     db.update_job(job_id, status="running")
     try:
+        orig_job = db.get_job(job_id)
+        orig_cost = 0.0
+        if orig_job and isinstance(orig_job.get("result"), dict):
+            orig_cost = float(orig_job["result"].get("total_estimated_cost", 0.0))
+
         itinerary_data = await asyncio.to_thread(_run_revision_sync, inputs)
+
+        if isinstance(itinerary_data, dict):
+            new_cost = float(itinerary_data.get("total_estimated_cost", 0.0))
+            currency = itinerary_data.get("currency", "INR")
+            sym = "$" if currency == "USD" else ("€" if currency == "EUR" else "₹")
+
+            budget_alert = None
+            if orig_cost > 0 and new_cost > orig_cost:
+                diff = round(new_cost - orig_cost, 2)
+                pct = round((diff / orig_cost) * 100.0, 1)
+                budget_alert = f"This revision increased your total cost from {sym}{int(orig_cost):,} to {sym}{int(new_cost):,} (+{sym}{int(diff):,}, +{pct:.1f}%)"
+
+            itinerary_data["budget_alert"] = budget_alert
+
         db.update_job(job_id, status="complete", result=itinerary_data)
     except Exception as e:
         db.update_job(job_id, status="failed", error=str(e))
