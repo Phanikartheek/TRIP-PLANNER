@@ -6,11 +6,13 @@ Executes Script 1 (Group Splitting), Script 2 (Weather), and Script 3 (Trip Comp
 import json
 import sys
 import time
+import urllib.error
 import urllib.request
 
 from trip_planner.tools.weather_tools import format_forecast_summary, get_forecast
 
-sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stdout, "reconfigure"):
+    getattr(sys.stdout, "reconfigure")(encoding="utf-8")
 
 API_BASE = "http://127.0.0.1:8000"
 

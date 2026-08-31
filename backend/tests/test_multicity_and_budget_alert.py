@@ -76,14 +76,15 @@ def test_multicity_schema_and_normalization():
 
     # Test normalization helper logic
     inputs = {"cities": "Goa, Gokarna", "multi_city": True}
-    raw_dict = dict(mock_crew_output)
+    raw_dict: dict[str, str | int | float | list[str] | list[dict[str, str | float]] | None] = dict(mock_crew_output)
     # Simulate _run_crew_sync normalization
     if inputs.get("multi_city"):
-        raw_cities = [c.strip() for c in inputs["cities"].split(",")]
+        raw_cities = [c.strip() for c in str(inputs["cities"]).split(",")]
         if not raw_dict.get("cities_visited"):
             raw_dict["cities_visited"] = raw_cities
-        if raw_dict.get("cities_visited"):
-            raw_dict["destination_city"] = raw_dict["cities_visited"][0]
+        visited = raw_dict.get("cities_visited")
+        if isinstance(visited, list) and len(visited) > 0:
+            raw_dict["destination_city"] = visited[0]
 
     assert raw_dict["destination_city"] == "Goa"
     assert raw_dict["cities_visited"] == ["Goa", "Gokarna"]
@@ -158,7 +159,9 @@ async def test_budget_alert_calculation(tmp_path: Path, monkeypatch: pytest.Monk
         await _execute_revision_job(job_id, {"job_id": job_id, "feedback": "upgrade hotel"})
 
     revised_job = db.get_job(job_id, db_path=db_file)
-    res = revised_job["result"]
+    assert revised_job is not None
+    res = revised_job.get("result")
+    assert isinstance(res, dict)
     assert "budget_alert" in res
     assert res["budget_alert"] == "This revision increased your total cost from ₹15,000 to ₹18,200 (+₹3,200, +21.3%)"
 
@@ -176,5 +179,7 @@ async def test_budget_alert_calculation(tmp_path: Path, monkeypatch: pytest.Monk
         await _execute_revision_job(job_id, {"job_id": job_id, "feedback": "make it cheaper"})
 
     revised_job_lower = db.get_job(job_id, db_path=db_file)
-    res_lower = revised_job_lower["result"]
+    assert revised_job_lower is not None
+    res_lower = revised_job_lower.get("result")
+    assert isinstance(res_lower, dict)
     assert res_lower.get("budget_alert") is None

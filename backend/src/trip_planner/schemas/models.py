@@ -84,6 +84,83 @@ class CitySelection(BaseModel):
         return 5000.0
 
 
+class EmergencyLocation(BaseModel):
+    name: str = Field(..., description="Name of the hospital or police station")
+    area: str = Field(..., description="Neighborhood, area, or address")
+
+
+class EmergencyInfo(BaseModel):
+    national_emergency_number: str = Field(
+        default="112",
+        description="National unified emergency number (e.g. 112 in India)",
+    )
+    nearest_hospital: EmergencyLocation | None = Field(
+        default=None, description="Real hospital verified via search"
+    )
+    nearest_police_station: EmergencyLocation | None = Field(
+        default=None, description="Real police station verified via search"
+    )
+    grounded: bool = Field(
+        default=True,
+        description="True if hospital/police info came from actual search results; False if generic fallback",
+    )
+
+
+class PhrasebookEntry(BaseModel):
+    phrase_english: str = Field(..., description="English phrase, e.g. 'Hello' or 'Thank you'")
+    phrase_local: str = Field(..., description="Local language script phrase, e.g. 'నమస్కారం' or 'ధన్యవాదాలు'")
+    pronunciation: str = Field(..., description="Phonetic pronunciation guide, e.g. 'Namaskaram'")
+
+
+CITY_REGIONAL_LANGUAGES = {
+    "vijayawada": "Telugu",
+    "visakhapatnam": "Telugu",
+    "tirupati": "Telugu",
+    "hyderabad": "Telugu",
+    "bengaluru": "Kannada",
+    "mysuru": "Kannada",
+    "mysore": "Kannada",
+    "mangaluru": "Kannada",
+    "hampi": "Kannada",
+    "kochi": "Malayalam",
+    "cochin": "Malayalam",
+    "trivandrum": "Malayalam",
+    "thiruvananthapuram": "Malayalam",
+    "munnar": "Malayalam",
+    "alleppey": "Malayalam",
+    "alappuzha": "Malayalam",
+    "wayanad": "Malayalam",
+    "chennai": "Tamil",
+    "madurai": "Tamil",
+    "coimbatore": "Tamil",
+    "kolkata": "Bengali",
+    "darjeeling": "Bengali",
+    "mumbai": "Marathi",
+    "pune": "Marathi",
+    "goa": "Konkani / Marathi / Hindi",
+    "gokarna": "Kannada",
+    "jaipur": "Hindi",
+    "udaipur": "Hindi",
+    "jodhpur": "Hindi",
+    "agra": "Hindi",
+    "varanasi": "Hindi",
+    "delhi": "Hindi",
+    "shimla": "Hindi",
+    "manali": "Hindi",
+}
+
+
+def get_regional_language_for_city(city_name: str) -> str:
+    """Returns the primary regional spoken language for a destination city."""
+    if not city_name:
+        return "Hindi"
+    key = city_name.strip().lower()
+    for k, lang in CITY_REGIONAL_LANGUAGES.items():
+        if k in key:
+            return lang
+    return "Hindi"
+
+
 class Attraction(BaseModel):
     name: str
     description: str
@@ -104,6 +181,9 @@ class CityGuide(BaseModel):
     transportation_tips: str
     best_season_and_weather: str | None = Field(
         default=None, description="Seasonal advice such as monsoon or summer precautions"
+    )
+    emergency_info: EmergencyInfo | None = Field(
+        default=None, description="Search-grounded emergency safety contacts (hospital & police)"
     )
 
 
@@ -220,6 +300,12 @@ class TripItinerary(BaseModel):
     )
     budget_alert: str | None = Field(
         default=None, description="Budget-overrun warning message if a revision increased total cost"
+    )
+    emergency_info: EmergencyInfo | None = Field(
+        default=None, description="Search-grounded emergency safety contacts (hospital & police)"
+    )
+    local_phrasebook: list[PhrasebookEntry] | None = Field(
+        default=None, description="8-10 useful travel phrases in destination region's local language with pronunciation"
     )
 
     @model_validator(mode="after")

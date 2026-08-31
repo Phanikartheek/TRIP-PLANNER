@@ -23,11 +23,16 @@ gather_city_info_task:
     notable local food/restaurants (including regional specialties and dietary preferences),
     safety notes a visitor should know, and practical transportation tips (airport/railway station transfers,
     local cabs, trains, metros, or scooter rentals). Use web search to ground this in current information.
+    
+    SEARCH-GROUNDED EMERGENCY CONTACTS RESEARCH:
+    Explicitly run web search queries for "hospital near {cities}" and "police station near {cities}".
+    - If search results return specific, real, verified hospital and police station names with their area/neighborhood in the destination city, populate `emergency_info` with `nearest_hospital` (name, area), `nearest_police_station` (name, area), `national_emergency_number` ("112"), and set `grounded: true`.
+    - If search results are empty, ambiguous, or fail to yield real verifiable hospital/police station names, set `grounded: false` and set nearest_hospital and nearest_police_station to null instead of inventing names.
   expected_output: >-
     A structured city guide: a list of top attractions each with a short
     description and approximate cost in the specified currency, a list of local food
-    recommendations, a safety-notes paragraph, seasonal weather advice, and a transportation-tips
-    paragraph.
+    recommendations, a safety-notes paragraph, seasonal weather advice, a transportation-tips
+    paragraph, and emergency_info (grounded hospital/police info).
   agent: local_expert
   context:
     - select_city_task
@@ -49,6 +54,10 @@ plan_itinerary_task:
     3. On transition days between cities, include inter-city transit (train, bus, or cab/flight details and fares) as part of that transition day's morning/afternoon plan and cost breakdown.
     4. For EACH day in `days`, set the `city` field on `ItineraryDay` to the specific city visited on that day (e.g. Day 1 city: "Goa", Day 2 city: "Goa", Day 3 city: "Gokarna", Day 4 city: "Gokarna").
     5. Set `destination_city` to the FIRST city visited, and `cities_visited` to the full list of visited cities (e.g. ["Goa", "Gokarna"]).
+    
+    SAFETY EMERGENCY INFO & LOCAL PHRASEBOOK:
+    1. Include `emergency_info` as passed from the local expert's research (`national_emergency_number`, `nearest_hospital`, `nearest_police_station`, `grounded`).
+    2. Provide `local_phrasebook`: Include 8-10 essential, practical travel phrases (e.g. "Hello", "Thank you", "How much does this cost?", "Where is the bathroom?", "I need help", "Water please", "Delicious food") in the destination region's actual primary spoken language (e.g. Malayalam for Kochi, Kannada for Mysuru/Bengaluru, Telugu for Vijayawada/Visakhapatnam, Hindi for Rajasthan/UP/Delhi, Tamil for Chennai, Marathi for Mumbai, Bengali for Kolkata). Format each item with `phrase_english`, `phrase_local` (in proper native script), and `pronunciation` (clear phonetic guide for non-speakers).
     
     GROUP TRIP SIZE & TRAVELERS:
     This trip is planned for {travelers} traveler(s).

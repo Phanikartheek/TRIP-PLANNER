@@ -1015,6 +1015,64 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     loadChecklist();
 
+    // Render Emergency Info Card
+    const emCard = document.getElementById('emergency-card');
+    const emBadge = document.getElementById('emergency-grounded-badge');
+    const emWarn = document.getElementById('emergency-warning-note');
+    const emNat = document.getElementById('emergency-national-num');
+    const emHospName = document.getElementById('emergency-hospital-name');
+    const emHospArea = document.getElementById('emergency-hospital-area');
+    const emPolName = document.getElementById('emergency-police-name');
+    const emPolArea = document.getElementById('emergency-police-area');
+
+    if (itinerary.emergency_info && emCard) {
+      emCard.style.display = 'block';
+      const em = itinerary.emergency_info;
+      if (emNat) emNat.textContent = em.national_emergency_number || '112';
+
+      if (em.nearest_hospital && em.nearest_hospital.name) {
+        if (emHospName) emHospName.textContent = em.nearest_hospital.name;
+        if (emHospArea) emHospArea.textContent = `📍 ${em.nearest_hospital.area || city}`;
+      } else {
+        if (emHospName) emHospName.textContent = 'City General Hospital';
+        if (emHospArea) emHospArea.textContent = `📍 ${city}`;
+      }
+
+      if (em.nearest_police_station && em.nearest_police_station.name) {
+        if (emPolName) emPolName.textContent = em.nearest_police_station.name;
+        if (emPolArea) emPolArea.textContent = `📍 ${em.nearest_police_station.area || city}`;
+      } else {
+        if (emPolName) emPolName.textContent = 'Central Police Station';
+        if (emPolArea) emPolArea.textContent = `📍 ${city}`;
+      }
+
+      if (em.grounded) {
+        if (emBadge) { emBadge.style.display = 'inline-block'; emBadge.textContent = '✓ Verified Search Results'; }
+        if (emWarn) emWarn.style.display = 'none';
+      } else {
+        if (emBadge) emBadge.style.display = 'none';
+        if (emWarn) emWarn.style.display = 'block';
+      }
+    } else if (emCard) {
+      emCard.style.display = 'none';
+    }
+
+    // Render Local Phrasebook Card
+    const pbCard = document.getElementById('phrasebook-card');
+    const pbBody = document.getElementById('phrasebook-table-body');
+    if (itinerary.local_phrasebook && itinerary.local_phrasebook.length > 0 && pbCard && pbBody) {
+      pbCard.style.display = 'block';
+      pbBody.innerHTML = itinerary.local_phrasebook.map(entry => `
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 8px 12px; font-weight: 600; color: #f8fafc;">${escapeHtml(entry.phrase_english)}</td>
+          <td style="padding: 8px 12px; color: #38bdf8; font-weight: 700;">${escapeHtml(entry.phrase_local)}</td>
+          <td style="padding: 8px 12px; color: #cbd5e1; font-style: italic;">"${escapeHtml(entry.pronunciation)}"</td>
+        </tr>
+      `).join('');
+    } else if (pbCard) {
+      pbCard.style.display = 'none';
+    }
+
     // Render Recommended Stay
     const stayCard = document.getElementById('stay-card');
     const stayTierBadge = document.getElementById('stay-tier-badge');
