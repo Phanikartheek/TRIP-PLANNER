@@ -47,6 +47,11 @@
     <!-- Main Shared Results Container -->
     <section class="glass-card results-card hidden" id="share-results-card" style="display: none;">
       <!-- Destination Banner -->
+      <!-- Live Countdown Banner -->
+      <div id="share-countdown-banner" class="countdown-banner" style="display: none; background: linear-gradient(135deg, #4f46e5, #0284c7); color: white; padding: 12px 20px; border-radius: 8px; font-weight: 600; margin-bottom: 20px; text-align: center;">
+        <span id="share-countdown-text"></span>
+      </div>
+
       <div class="dest-banner">
         <div class="dest-info">
           <span class="dest-country-badge" id="share-dest-country">DESTINATION</span>
@@ -233,18 +238,49 @@
           timelineEl.appendChild(card);
         });
 
-        // Packing
+        // Countdown Banner
+        const tDate = data.travel_date || itinerary.travel_date;
+        if (tDate) {
+          const today = new Date(); today.setHours(0,0,0,0);
+          const target = new Date(tDate); target.setHours(0,0,0,0);
+          const diffDays = Math.ceil((target - today) / 86400000);
+          const cBanner = document.getElementById('share-countdown-banner');
+          const cText = document.getElementById('share-countdown-text');
+          if (cBanner && cText) {
+            if (diffDays > 0) cText.textContent = `🗓️ ${diffDays} day${diffDays === 1 ? '' : 's'} until trip! (${tDate})`;
+            else if (diffDays === 0) cText.textContent = `✈️ Trip starts today! (${tDate})`;
+            else cText.textContent = `✈️ Trip took place on ${tDate}`;
+            cBanner.style.display = 'block';
+          }
+        }
+
+        // Packing Checklist with API persistence
         const packingEl = document.getElementById('share-packing-grid');
         packingEl.innerHTML = '';
-        (itinerary.packing_suggestions || []).forEach((item, idx) => {
+        let checklistItems = data.checklist || [];
+        if (!checklistItems || checklistItems.length === 0) {
+          checklistItems = (itinerary.packing_suggestions || []).map(item => ({ item, checked: false }));
+        }
+        checklistItems.forEach((itemObj, idx) => {
+          const itemText = typeof itemObj === 'string' ? itemObj : itemObj.item;
+          const isChecked = typeof itemObj === 'object' && itemObj.checked;
           const itemEl = document.createElement('label');
-          itemEl.className = 'checklist-item';
+          itemEl.className = `checklist-item${isChecked ? ' done' : ''}`;
           itemEl.innerHTML = `
-            <input type="checkbox" id="pack-${idx}">
-            <span class="checklist-text">${escapeHtml(item)}</span>
+            <input type="checkbox" id="pack-${idx}" ${isChecked ? 'checked' : ''}>
+            <span class="checklist-text">${escapeHtml(itemText)}</span>
           `;
-          itemEl.querySelector('input').addEventListener('change', (e) => {
+          itemEl.querySelector('input').addEventListener('change', async (e) => {
             itemEl.classList.toggle('done', e.target.checked);
+            try {
+              await fetch(`/api/trip/${jobId}/checklist`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ item: itemText, checked: e.target.checked }),
+              });
+            } catch (err) {
+              console.error('Failed to update checklist item:', err);
+            }
           });
           packingEl.appendChild(itemEl);
         });

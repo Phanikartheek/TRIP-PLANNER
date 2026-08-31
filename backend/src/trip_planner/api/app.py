@@ -74,10 +74,81 @@ app.add_middleware(
 )
 
 
+def check_and_send_reminders(db_path: Path | str | None = None) -> list[str]:
+    """
+    Checks DB for completed jobs starting tomorrow (travel_date == tomorrow) with reminder_sent=False
+    and valid user_email. Dispatches reminder email and marks reminder_sent=True.
+    """
+    from datetime import datetime, timedelta
+    tomorrow_str = (datetime.now().date() + timedelta(days=1)).isoformat()
+    processed_job_ids: list[str] = []
+
+    with db.get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT job_id, user_email, result, travel_date
+            FROM jobs
+            WHERE status = 'complete'
+              AND (reminder_sent = 0 OR reminder_sent IS NULL)
+              AND travel_date = ?
+              AND user_email IS NOT NULL
+              AND user_email != '';
+            """,
+            (tomorrow_str,),
+        )
+        rows = cursor.fetchall()
+        for row in rows:
+            jid = row["job_id"]
+            email = row["user_email"]
+            res_dict = json.loads(row["result"]) if row["result"] else {}
+            city = res_dict.get("destination_city", "your destination")
+            length = res_dict.get("trip_length_days", 1)
+
+            email_html = f"""
+            <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 500px; border: 1px solid #e0e0e0; border-radius: 8px;">
+              <h2 style="color: #4f46e5;">✈️ Trip Reminder: {city} Tomorrow!</h2>
+              <p>Your {length}-day trip to <strong>{city}</strong> starts tomorrow ({tomorrow_str}).</p>
+              <p>Don't forget to review your packing checklist and itinerary details!</p>
+            </div>
+            """
+            email_sent = False
+            if os.getenv("RESEND_API_KEY"):
+                try:
+                    resend.Emails.send({
+                        "from": "AI Trip Planner <onboarding@resend.dev>",
+                        "to": [email],
+                        "subject": f"Reminder: Your trip to {city} is tomorrow!",
+                        "html": email_html,
+                    })
+                    email_sent = True
+                except Exception as e:
+                    logger.error(f"Failed to send reminder email to {email}: {e}")
+
+            if not email_sent:
+                logger.info(f"[REMINDER LOG] Sent trip reminder to {email} for job {jid} (City: {city}, Date: {tomorrow_str})")
+                print(f"[REMINDER LOG] Sent trip reminder to {email} for job {jid} (City: {city}, Date: {tomorrow_str})", flush=True)
+
+            db.update_job(jid, reminder_sent=True, db_path=db_path)
+            processed_job_ids.append(jid)
+
+    return processed_job_ids
+
+
+async def _reminder_background_worker():
+    while True:
+        try:
+            check_and_send_reminders()
+        except Exception as e:
+            logger.error(f"Error in reminder background worker loop: {e}")
+        await asyncio.sleep(3600)
+
+
 @app.on_event("startup")
 def on_startup():
-    """Initializes the SQLite job store and reconciles interrupted jobs."""
+    """Initializes the SQLite job store, reconciles interrupted jobs, and starts reminder task."""
     db.init_db()
+    asyncio.create_task(_reminder_background_worker())
 
 
 # Locate frontend directory relative to project root
@@ -117,12 +188,20 @@ class VerifyTokenRequest(BaseModel):
     token: str = Field(..., description="Magic token or full verification URL")
 
 
+class ChecklistItemPatch(BaseModel):
+    item: str = Field(..., description="Checklist item text")
+    checked: bool = Field(..., description="Checked boolean state")
+
+
 class JobStatusResponse(BaseModel):
     job_id: str
     status: str = Field(description="Job status: pending, running, complete, or failed")
     result: dict[str, Any] | None = None
     error: str | None = None
     created_at: float | None = None
+    travel_date: str | None = None
+    reminder_sent: bool | None = None
+    checklist: list[dict[str, Any]] | None = None
 
 
 def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -703,7 +782,13 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
 
     user_email = _get_current_user_email(request)
     job_id = str(uuid.uuid4())
-    job_rec = db.create_job(job_id=job_id, job_type="plan", status="pending", user_email=user_email)
+    job_rec = db.create_job(
+        job_id=job_id,
+        job_type="plan",
+        status="pending",
+        user_email=user_email,
+        travel_date=payload.travel_date,
+    )
 
     # Kick off asynchronous background execution
     asyncio.create_task(_execute_trip_job(job_id, crew_inputs))
@@ -712,7 +797,42 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
         job_id=job_id,
         status="pending",
         created_at=job_rec["created_at"],
+        travel_date=job_rec.get("travel_date"),
+        reminder_sent=job_rec.get("reminder_sent"),
     )
+
+
+def _is_rain_day(day: dict[str, Any], threshold: float = 50.0) -> bool:
+    """
+    Determines if a day should be counted as a 'rain day' based on numeric rain probability (>50%).
+    Checks:
+    1. Direct numeric 'rain_probability' or 'precipitation_probability' in day dictionary.
+    2. Explicit numeric percentage in free-text 'weather_note' (e.g. '22% rain' -> 22.0, '71%' -> 71.0).
+    3. Fallback to qualitative rain terms ONLY if no numeric percentage is present anywhere.
+    """
+    for key in ("rain_probability", "precipitation_probability"):
+        val = day.get(key)
+        if val is not None:
+            try:
+                return float(val) > threshold
+            except (ValueError, TypeError):
+                pass
+
+    wnote = day.get("weather_note") or ""
+    match = re.search(r"(\d+(?:\.\d+)?)\s*%", wnote)
+    if match:
+        try:
+            prob = float(match.group(1))
+            return prob > threshold
+        except ValueError:
+            pass
+
+    wnote_lower = wnote.lower()
+    if any(k in wnote_lower for k in ("heavy rain", "thunderstorm", "downpour", "rain likely", "showers", "drizzle", "rain")):
+        if not any(neg in wnote_lower for neg in ("no rain", "0%", "clear", "sunny", "low chance")):
+            return True
+
+    return False
 
 
 @app.post("/api/compare-trips")
@@ -738,11 +858,7 @@ async def compare_trips_endpoint(payload: CompareTripsRequest):
 
         res = job["result"]
         days = res.get("days", [])
-        rain_days_count = 0
-        for d in days:
-            wnote = (d.get("weather_note") or "").lower()
-            if "rain" in wnote or "shower" in wnote or "storm" in wnote or "drizzle" in wnote:
-                rain_days_count += 1
+        rain_days_count = sum(1 for d in days if _is_rain_day(d))
 
         if rain_days_count == 0:
             w_summary = "Mostly clear / pleasant"
@@ -904,7 +1020,102 @@ async def get_job_status(job_id: str):
         result=job.get("result"),
         error=job.get("error"),
         created_at=job.get("created_at"),
+        travel_date=job.get("travel_date"),
+        reminder_sent=job.get("reminder_sent"),
+        checklist=db.get_checklist(job_id) if job.get("status") == "complete" else None,
     )
+
+
+@app.get("/api/trip/{job_id}/checklist")
+async def get_trip_checklist_endpoint(job_id: str):
+    """Returns current checklist state for a trip job."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Trip job '{job_id}' not found.")
+    checklist = db.get_checklist(job_id)
+    return {"job_id": job_id, "checklist": checklist}
+
+
+@app.patch("/api/trip/{job_id}/checklist")
+async def patch_trip_checklist_endpoint(job_id: str, payload: ChecklistItemPatch):
+    """Updates a single checklist item state for a trip job."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Trip job '{job_id}' not found.")
+    updated = db.update_checklist_item(job_id, payload.item, payload.checked)
+    return {"job_id": job_id, "checklist": updated}
+
+
+@app.get("/api/trip/{job_id}/recommendations")
+async def get_trip_recommendations_endpoint(job_id: str):
+    """
+    Looks at target job's destination_city & interests/country, queries other completed jobs
+    with different destination_city, returns up to 3 recommendations with public fields only.
+    Excludes user_email, qa_history, and private data.
+    """
+    target_job = db.get_job(job_id)
+    if not target_job:
+        raise HTTPException(status_code=404, detail=f"Trip job '{job_id}' not found.")
+
+    target_res = target_job.get("result") or {}
+    target_city = (target_res.get("destination_city") or "").strip().lower()
+    target_country = (target_res.get("destination_country") or "India").strip().lower()
+
+    raw_interests = str(target_res.get("interests") or "").lower()
+    interest_words = set(re.findall(r"\w+", raw_interests)) - {"and", "the", "or", "in", "with", "for", "to", "a", "of"}
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT job_id, result FROM jobs
+            WHERE status = 'complete' AND job_type = 'plan' AND job_id != ?;
+            """,
+            (job_id,),
+        )
+        rows = cursor.fetchall()
+
+    candidates = []
+    seen_cities = set()
+    for row in rows:
+        c_jid = row["job_id"]
+        c_res = json.loads(row["result"]) if row["result"] else {}
+        c_city = (c_res.get("destination_city") or "").strip()
+        c_country = (c_res.get("destination_country") or "India").strip()
+
+        if not c_city or c_city.lower() == target_city or c_city.lower() in seen_cities:
+            continue
+
+        c_text = (json.dumps(c_res)).lower()
+        score = 0
+        if c_country.lower() == target_country:
+            score += 1
+
+        for w in interest_words:
+            if len(w) > 3 and w in c_text:
+                score += 1
+
+        if score > 0 or len(rows) <= 3:
+            seen_cities.add(c_city.lower())
+            days = c_res.get("days") or []
+            theme_highlights = [d.get("theme") for d in days if isinstance(d, dict) and d.get("theme")]
+            candidates.append({
+                "score": score,
+                "data": {
+                    "job_id": c_jid,
+                    "destination_city": c_city,
+                    "destination_country": c_country,
+                    "trip_length_days": c_res.get("trip_length_days", len(days)),
+                    "total_estimated_cost": c_res.get("total_estimated_cost", 0.0),
+                    "currency": c_res.get("currency", "INR"),
+                    "theme_highlights": theme_highlights,
+                }
+            })
+
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    recs = [c["data"] for c in candidates[:3]]
+
+    return {"job_id": job_id, "recommendations": recs}
 
 
 @app.get("/")
