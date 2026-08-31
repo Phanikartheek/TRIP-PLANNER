@@ -1073,6 +1073,64 @@ document.addEventListener('DOMContentLoaded', () => {
       pbCard.style.display = 'none';
     }
 
+    // Render Local Festivals & Events Card
+    const evCard = document.getElementById('events-card');
+    const evBadge = document.getElementById('events-grounded-badge');
+    const evWarn = document.getElementById('events-warning-note');
+    const evContainer = document.getElementById('events-container');
+    if (itinerary.local_events && itinerary.local_events.length > 0 && evCard && evContainer) {
+      evCard.style.display = 'block';
+      if (itinerary.events_grounded) {
+        if (evBadge) { evBadge.style.display = 'inline-block'; evBadge.textContent = '✓ Verified Event Search'; }
+        if (evWarn) evWarn.style.display = 'none';
+      } else {
+        if (evBadge) evBadge.style.display = 'none';
+        if (evWarn) evWarn.style.display = 'block';
+      }
+      evContainer.innerHTML = itinerary.local_events.map(ev => `
+        <div style="background: rgba(15, 23, 42, 0.6); padding: 14px 16px; border-radius: 8px; border: 1px solid rgba(245, 158, 11, 0.2);">
+          <div style="font-weight: 700; color: #fbbf24; font-size: 0.95rem;">${escapeHtml(ev.name)}</div>
+          <div style="font-size: 0.8rem; color: #94a3b8; font-weight: 600; margin: 2px 0 6px 0;">🗓️ ${escapeHtml(ev.date_or_period)}</div>
+          <div style="font-size: 0.85rem; color: #cbd5e1; line-height: 1.4;">${escapeHtml(ev.description)}</div>
+        </div>
+      `).join('');
+    } else if (evCard) {
+      evCard.style.display = 'none';
+    }
+
+    // Render Local Etiquette Guide Card
+    const etCard = document.getElementById('etiquette-card');
+    const etContainer = document.getElementById('etiquette-container');
+    if (itinerary.local_etiquette && itinerary.local_etiquette.length > 0 && etCard && etContainer) {
+      etCard.style.display = 'block';
+      etContainer.innerHTML = itinerary.local_etiquette.map(item => `
+        <div style="background: rgba(15, 23, 42, 0.6); padding: 14px 16px; border-radius: 8px; border: 1px solid rgba(168, 85, 247, 0.2);">
+          <div style="font-weight: 700; color: #e9d5ff; font-size: 0.88rem; text-transform: uppercase; margin-bottom: 4px;">📍 ${escapeHtml(item.category)}</div>
+          <div style="font-size: 0.86rem; color: #cbd5e1; line-height: 1.4;">${escapeHtml(item.advice)}</div>
+        </div>
+      `).join('');
+    } else if (etCard) {
+      etCard.style.display = 'none';
+    }
+
+    // Render Nearby Day Trips Card
+    const dtCard = document.getElementById('daytrips-card');
+    const dtContainer = document.getElementById('daytrips-container');
+    if (itinerary.nearby_day_trips && itinerary.nearby_day_trips.length > 0 && dtCard && dtContainer) {
+      dtCard.style.display = 'block';
+      dtContainer.innerHTML = itinerary.nearby_day_trips.map(trip => `
+        <div style="background: rgba(15, 23, 42, 0.6); padding: 14px 16px; border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.2);">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+            <div style="font-weight: 700; color: #6ee7b7; font-size: 0.95rem;">${escapeHtml(trip.name)}</div>
+            <span style="font-size: 0.76rem; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">${escapeHtml(trip.distance_from_destination)}</span>
+          </div>
+          <div style="font-size: 0.85rem; color: #cbd5e1; line-height: 1.4; margin-top: 4px;">${escapeHtml(trip.why_visit)}</div>
+        </div>
+      `).join('');
+    } else if (dtCard) {
+      dtCard.style.display = 'none';
+    }
+
     // Render Recommended Stay
     const stayCard = document.getElementById('stay-card');
     const stayTierBadge = document.getElementById('stay-tier-badge');

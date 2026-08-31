@@ -117,6 +117,28 @@ class PhrasebookEntry(BaseModel):
     pronunciation: str = Field(..., description="Phonetic pronunciation guide for non-speakers, e.g. 'Namaskaram'")
 
 
+class LocalEvent(BaseModel):
+    name: str = Field(..., description="Name of the festival or event")
+    date_or_period: str = Field(..., description="Date, month, or season when it takes place")
+    description: str = Field(..., description="Short summary of what happens and why it's celebrated")
+
+
+class EtiquetteItem(BaseModel):
+    category: str = Field(
+        ...,
+        description="Etiquette area, e.g. 'Temple Dress Code', 'Footwear Rules', 'Tipping Norms', 'Photography Restrictions', 'Greeting Custom'",
+    )
+    advice: str = Field(..., description="Specific cultural advice tailored to this region/state")
+
+
+class NearbyDayTrip(BaseModel):
+    name: str = Field(..., description="Name of the day-trip destination")
+    distance_from_destination: str = Field(
+        ..., description="Approximate travel distance or time, e.g. '35 km (1 hr drive)'"
+    )
+    why_visit: str = Field(..., description="Key attraction or reason to take this day trip")
+
+
 CITY_REGIONAL_LANGUAGES = {
     "vijayawada": "Telugu",
     "visakhapatnam": "Telugu",
@@ -189,6 +211,15 @@ class CityGuide(BaseModel):
     )
     emergency_info: EmergencyInfo | None = Field(
         default=None, description="Search-grounded emergency safety contacts (hospital & police)"
+    )
+    local_events: list[LocalEvent] | None = Field(
+        default=None, description="Search-grounded local festivals or events"
+    )
+    events_grounded: bool = Field(
+        default=True, description="True if local_events came from actual web search results; False if generic fallback"
+    )
+    nearby_day_trips: list[NearbyDayTrip] | None = Field(
+        default=None, description="Search-grounded nearby day-trip destinations within 1-2 hours drive"
     )
 
 
@@ -311,6 +342,18 @@ class TripItinerary(BaseModel):
     )
     local_phrasebook: list[PhrasebookEntry] | None = Field(
         default=None, description="8-10 useful travel phrases in destination region's local language with pronunciation"
+    )
+    local_events: list[LocalEvent] | None = Field(
+        default=None, description="Search-grounded local festivals or events"
+    )
+    events_grounded: bool = Field(
+        default=True, description="True if local_events came from actual web search results; False if generic fallback"
+    )
+    local_etiquette: list[EtiquetteItem] | None = Field(
+        default=None, description="5-6 region-specific cultural etiquette and customs advice items"
+    )
+    nearby_day_trips: list[NearbyDayTrip] | None = Field(
+        default=None, description="2-3 search-grounded nearby day-trip excursion suggestions with travel distances"
     )
 
     @model_validator(mode="after")
