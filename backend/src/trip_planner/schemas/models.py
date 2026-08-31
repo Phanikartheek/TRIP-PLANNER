@@ -134,6 +134,8 @@ class EtiquetteItem(BaseModel):
 
 
 class NearbyDayTrip(BaseModel):
+    """Search-grounded nearby day-trip excursion suggestion."""
+
     name: str = Field(..., description="Name of the day-trip destination")
     distance_from_destination: str = Field(
         ..., description="Approximate travel distance or time, e.g. '35 km (1 hr drive)'"
