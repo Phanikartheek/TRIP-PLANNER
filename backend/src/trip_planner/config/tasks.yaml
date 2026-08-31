@@ -57,7 +57,8 @@ plan_itinerary_task:
     
     SAFETY EMERGENCY INFO & LOCAL PHRASEBOOK:
     1. Include `emergency_info` as passed from the local expert's research (`national_emergency_number`, `nearest_hospital`, `nearest_police_station`, `grounded`).
-    2. Provide `local_phrasebook`: Include 8-10 essential, practical travel phrases (e.g. "Hello", "Thank you", "How much does this cost?", "Where is the bathroom?", "I need help", "Water please", "Delicious food") in the destination region's actual primary spoken language (e.g. Malayalam for Kochi, Kannada for Mysuru/Bengaluru, Telugu for Vijayawada/Visakhapatnam, Hindi for Rajasthan/UP/Delhi, Tamil for Chennai, Marathi for Mumbai, Bengali for Kolkata). Format each item with `phrase_english`, `phrase_local` (in proper native script), and `pronunciation` (clear phonetic guide for non-speakers).
+    2. Provide `local_phrasebook`: Include 8-10 essential, practical travel phrases (e.g. "Hello", "Thank you", "How much does this cost?", "Where is the bathroom?", "I need help", "Water please", "Delicious food") in the destination region's actual primary spoken language (e.g. Malayalam for Kochi, Kannada for Mysuru/Bengaluru, Telugu for Vijayawada/Visakhapatnam, Hindi for Rajasthan/UP/Delhi, Tamil for Chennai, Marathi for Mumbai, Bengali for Kolkata).
+       CRITICAL SCRIPT PURITY RULE: Write `phrase_local` ONLY in the single native script of the target regional language (e.g. Malayalam script for Kochi, Kannada script for Mysuru). Do NOT include Telugu/Hindi or any other language's script, and do NOT include parenthetical translations or script labels. Format each item with `phrase_english`, `phrase_local` (pure native script), and `pronunciation` (clear phonetic guide).
     
     GROUP TRIP SIZE & TRAVELERS:
     This trip is planned for {travelers} traveler(s).

@@ -110,8 +110,11 @@ class PhrasebookEntry(BaseModel):
     """Regional travel phrasebook entry with English, native local script, and phonetic pronunciation guide."""
 
     phrase_english: str = Field(..., description="English phrase, e.g. 'Hello' or 'Thank you'")
-    phrase_local: str = Field(..., description="Local language script phrase, e.g. 'నమస్కారం' or 'ధన్యవాదాలు'")
-    pronunciation: str = Field(..., description="Phonetic pronunciation guide, e.g. 'Namaskaram'")
+    phrase_local: str = Field(
+        ...,
+        description="Phrase strictly in the single native script of the destination city's regional language (no parenthetical notes, no other scripts)",
+    )
+    pronunciation: str = Field(..., description="Phonetic pronunciation guide for non-speakers, e.g. 'Namaskaram'")
 
 
 CITY_REGIONAL_LANGUAGES = {
