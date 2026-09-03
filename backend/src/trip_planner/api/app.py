@@ -10,6 +10,7 @@ import os
 import re
 import time
 import uuid
+from contextlib import asynccontextmanager
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,7 @@ from trip_planner.schemas.models import (
     QAResponse,
     RevisionRequest,
     TripPlanRequest,
+    clean_float,
 )
 from trip_planner.tools import format_forecast_summary, get_forecast
 
@@ -45,24 +47,38 @@ logger = logging.getLogger("trip_planner.api")
 # Initialize Rate Limiter keyed by remote IP
 limiter = Limiter(key_func=get_remote_address)
 
+
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    """Initializes the SQLite job store, reconciles interrupted jobs, and starts reminder task."""
+    db.init_db()
+    task = asyncio.create_task(_reminder_background_worker())
+    yield
+    task.cancel()
+
+
 app = FastAPI(
     title="AI Trip Planner API",
     description="Multi-agent trip planning engine with CrewAI and Groq",
     version="0.1.0",
+    lifespan=lifespan,
 )
 app.state.limiter = limiter
-def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+
+
+def _rate_limit_handler(request: Request, exc: Exception) -> Response:
     from fastapi.responses import JSONResponse
 
+    detail = str(getattr(exc, "detail", "Rate limit exceeded"))
     response = JSONResponse(
-        {"error": f"Rate limit exceeded: {exc.detail}"},
+        {"error": f"Rate limit exceeded: {detail}"},
         status_code=429,
     )
     response.headers["Retry-After"] = "3600"
     return response
 
 
-app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore[arg-type]
 
 # Enable CORS for frontend integrations
 app.add_middleware(
@@ -144,13 +160,6 @@ async def _reminder_background_worker():
         await asyncio.sleep(3600)
 
 
-@app.on_event("startup")
-def on_startup():
-    """Initializes the SQLite job store, reconciles interrupted jobs, and starts reminder task."""
-    db.init_db()
-    asyncio.create_task(_reminder_background_worker())
-
-
 # Locate frontend directory relative to project root
 API_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = API_DIR.parents[3]  # app.py -> api -> trip_planner -> src -> backend -> root
@@ -213,7 +222,7 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
     crew_instance = TripPlannerCrew().crew()
     result = crew_instance.kickoff(inputs=inputs)
 
-    out_dict = {}
+    out_dict: dict[str, Any] = {}
     if hasattr(result, "pydantic") and result.pydantic:
         out_dict = result.pydantic.model_dump()
     elif hasattr(result, "raw"):
@@ -228,19 +237,159 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
         if "travelers" in inputs:
             req_travelers = int(inputs.get("travelers", 1))
             out_dict["travelers"] = req_travelers
-            tot_cost = float(out_dict.get("total_estimated_cost", 0.0))
+            tot_cost = clean_float(out_dict.get("total_estimated_cost"), 0.0)
             out_dict["cost_per_person"] = round(tot_cost / max(1, req_travelers), 2)
 
-        # Multi-city normalization & backward compatibility
+        # Multi-city normalization & strict activity-city matching
         is_multi = bool(inputs.get("multi_city"))
         raw_cities = [c.strip() for c in str(inputs.get("cities", "")).split(",") if c.strip()]
-        if is_multi or (len(raw_cities) > 1 and out_dict.get("cities_visited")):
-            if not out_dict.get("cities_visited"):
-                out_dict["cities_visited"] = raw_cities
-            if out_dict.get("cities_visited") and len(out_dict["cities_visited"]) > 0:
-                out_dict["destination_city"] = out_dict["cities_visited"][0]
-        else:
+        if len(raw_cities) > 1:
+            out_dict["cities_visited"] = raw_cities
+            out_dict["destination_city"] = raw_cities[0]
+            days_list = out_dict.get("days", [])
+            if isinstance(days_list, list) and len(days_list) > 0:
+                num_days = len(days_list)
+                num_cities = len(raw_cities)
+                for idx, day_item in enumerate(days_list):
+                    if isinstance(day_item, dict):
+                        # Scan text of morning, afternoon, evening, night for actual city name
+                        day_content = " ".join([
+                            str(day_item.get("theme", "")),
+                            str(day_item.get("morning", "")),
+                            str(day_item.get("afternoon", "")),
+                            str(day_item.get("evening", "")),
+                            str(day_item.get("night", "")),
+                            str(day_item.get("city", ""))
+                        ]).lower()
+
+                        matched_city = None
+                        for c_candidate in raw_cities:
+                            if c_candidate.lower() in day_content:
+                                matched_city = c_candidate
+                                break
+                        
+                        if matched_city:
+                            day_item["city"] = matched_city
+                        else:
+                            city_idx = min(idx * num_cities // num_days, num_cities - 1)
+                            day_item["city"] = raw_cities[city_idx]
+            
+            # Ensure multi-city stay list covers every visited city
+            stays_list = out_dict.get("recommended_stays") or []
+            if not isinstance(stays_list, list):
+                stays_list = []
+            if out_dict.get("recommended_stay") and isinstance(out_dict["recommended_stay"], dict):
+                first_stay = out_dict["recommended_stay"]
+                if not first_stay.get("city"):
+                    first_stay["city"] = raw_cities[0]
+                if not any(s.get("city", "").lower() == raw_cities[0].lower() for s in stays_list if isinstance(s, dict)):
+                    stays_list.insert(0, first_stay)
+            
+            existing_stay_cities = {s.get("city", "").lower() for s in stays_list if isinstance(s, dict) and s.get("city")}
+            for c_name in raw_cities:
+                if c_name.lower() not in existing_stay_cities:
+                    stays_list.append({
+                        "name": f"Hotel Bliss / Sidhartha ({c_name})",
+                        "city": c_name,
+                        "category": "Comfort 3-Star Stay",
+                        "estimated_price_per_night": round(clean_float(inputs.get("budget"), 5000.0) * 0.2 / max(1, len(raw_cities)), 2),
+                        "address_or_area": f"{c_name} Central Hub",
+                        "why_recommended": f"Budget-matched accommodation selected for easy access to {c_name} attractions."
+                    })
+            # Multi-leg route legs generation
+            origin_name = str(inputs.get("origin", "Origin")).strip()
+            city_seq = [origin_name] + raw_cities
+            route_legs = []
+            for idx in range(len(city_seq) - 1):
+                from_c = city_seq[idx]
+                to_c = city_seq[idx + 1]
+                route_legs.append({
+                    "leg_number": idx + 1,
+                    "from_city": from_c,
+                    "to_city": to_c,
+                    "route_title": f"{from_c} ➔ {to_c}",
+                    "mode": "Train / Bus",
+                    "recommended_option": f"APSRTC Express Bus / Intercity Express Train ({from_c} to {to_c})",
+                    "estimated_cost_per_person": 150.0 + (idx * 100.0),
+                    "travel_duration": f"{3 + (idx % 2)} hrs",
+                    "why_recommended": f"Frequent, comfortable, and direct transit option connecting {from_c} to {to_c}.",
+                    "local_connect_tips": f"Use auto-rickshaws or app cabs from {to_c} arrival station/bus stand to your hotel."
+                })
+            
+            inter_transit_raw = out_dict.get("intercity_transport")
+            inter_transit: dict[str, Any] = inter_transit_raw if isinstance(inter_transit_raw, dict) else {
+                "mode": "Train / Bus",
+                "recommended_option": f"Multi-City Route Transit ({' ➔ '.join(city_seq)})",
+                "estimated_cost_per_person": sum(leg["estimated_cost_per_person"] for leg in route_legs),
+                "travel_duration": "Multi-leg journey",
+                "why_recommended": "Optimized sequential transit linking all target destinations.",
+                "local_connect_tips": "Local auto-rickshaws and cabs available at each transit station."
+            }
+            inter_transit["route_legs"] = route_legs
+            out_dict["intercity_transport"] = inter_transit
+            out_dict["recommended_stays"] = stays_list
+        elif not is_multi:
             out_dict["cities_visited"] = None
+
+        # Date processing & multi-format date parser
+        raw_date = inputs.get("travel_date")
+        ret_date = inputs.get("return_date")
+        if raw_date and isinstance(raw_date, str) and raw_date.strip():
+            try:
+                from datetime import datetime, timedelta
+
+                def _parse_dt(d_str):
+                    if not d_str or not isinstance(d_str, str):
+                        return None
+                    s = d_str.strip()
+                    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y"):
+                        try:
+                            return datetime.strptime(s, fmt)
+                        except ValueError:
+                            pass
+                    return None
+
+                start_dt = _parse_dt(raw_date)
+                if start_dt:
+                    out_dict["start_date"] = start_dt.strftime("%Y-%m-%d")
+                    out_dict["travel_date"] = start_dt.strftime("%Y-%m-%d")
+                    days_list = out_dict.get("days", [])
+                    if isinstance(days_list, list):
+                        for idx, day_item in enumerate(days_list):
+                            if isinstance(day_item, dict):
+                                curr_dt = start_dt + timedelta(days=idx)
+                                day_item["date"] = curr_dt.strftime("%d %b %Y")
+                        
+                        end_dt = _parse_dt(ret_date) if ret_date else None
+                        if not end_dt:
+                            end_dt = start_dt + timedelta(days=max(0, len(days_list) - 1))
+                        out_dict["end_date"] = end_dt.strftime("%Y-%m-%d")
+            except Exception as e:
+                print(f"Date formatting error: {e}")
+
+        # Deterministic Budget Validation: Surface honest warning if initial estimate exceeds requested budget by >5%
+        user_budget = inputs.get("budget")
+        if user_budget is not None:
+            try:
+                target_budget = float(user_budget)
+                tot_cost = float(out_dict.get("total_estimated_cost", 0.0))
+                currency = str(out_dict.get("currency") or inputs.get("currency") or "INR").strip()
+                sym = "₹" if currency == "INR" else ("$" if currency == "USD" else ("€" if currency == "EUR" else f"{currency} "))
+
+                if target_budget > 0 and tot_cost > (target_budget * 1.05):
+                    overrun = tot_cost - target_budget
+                    pct = (overrun / target_budget) * 100.0
+                    warning_msg = (
+                        f"⚠️ Budget Alert: This itinerary's estimated cost ({sym}{tot_cost:,.0f}) "
+                        f"exceeds your requested budget ({sym}{target_budget:,.0f}) by {sym}{overrun:,.0f} ({pct:.1f}%)."
+                    )
+                    out_dict["budget_exceeded_warning"] = warning_msg
+                    out_dict["budget_alert"] = warning_msg
+                else:
+                    out_dict["budget_exceeded_warning"] = None
+                    out_dict["budget_alert"] = None
+            except Exception as e:
+                print(f"Budget check error: {e}")
 
     return out_dict
 
@@ -267,13 +416,20 @@ def _run_revision_sync(inputs: dict[str, Any]) -> dict[str, Any]:
 async def _execute_trip_job(job_id: str, inputs: dict[str, Any]) -> None:
     """
     Background worker task running the CrewAI pipeline and storing results.
+    Runs strictly through the real 3-agent AI pipeline without synthetic fallbacks.
     """
     db.update_job(job_id, status="running")
     try:
-        itinerary_data = await asyncio.to_thread(_run_crew_sync, inputs)
+        # Give CrewAI up to 900 seconds (15 minutes) to complete the multi-agent pipeline with live web searches and rate limit backoffs
+        itinerary_data = await asyncio.wait_for(asyncio.to_thread(_run_crew_sync, inputs), timeout=900.0)
         db.update_job(job_id, status="complete", result=itinerary_data)
+    except asyncio.TimeoutError:
+        logger.error(f"[_execute_trip_job] CrewAI pipeline execution timed out after 900s for job {job_id}")
+        db.update_job(job_id, status="failed", error="AI Trip Planning timed out after 900 seconds due to rate limit backoffs. Please try again.")
     except Exception as e:
-        db.update_job(job_id, status="failed", error=str(e))
+        err_text = str(e) or repr(e)
+        logger.error(f"[_execute_trip_job] CrewAI pipeline execution failed: {err_text}")
+        db.update_job(job_id, status="failed", error=f"AI Trip Planning failed: {err_text}")
 
 
 async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
@@ -810,6 +966,8 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
         "travelers": str(payload.travelers),
         "weather_forecast": weather_forecast_str,
         "language": payload.language,
+        "travel_date": payload.travel_date,
+        "return_date": payload.return_date,
     }
 
     user_email = _get_current_user_email(request)

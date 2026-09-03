@@ -53,6 +53,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const daysTimeline = document.getElementById('days-timeline');
   const packingGrid = document.getElementById('packing-grid');
 
+  // State Variables
+  let currentJobData = null;
+
   // Backend API Base URL Configuration (Supports FastAPI on :8000, VSCode Live Server on :5500, or file:// preview)
   const API_BASE = (window.location.protocol === 'file:' || (window.location.port && window.location.port !== '8000'))
     ? 'http://127.0.0.1:8000'
@@ -402,14 +405,165 @@ document.addEventListener('DOMContentLoaded', () => {
     return activePill ? activePill.dataset.food : '';
   }
 
-  // --- Slider Sync Handlers ---
+  // --- Slider & Date Sync Handlers ---
+  const travelDateInput = document.getElementById('travel_date');
+  const returnDateInput = document.getElementById('return_date');
+
+  function syncDatesAndDuration(source) {
+    if (!travelDateInput || !returnDateInput) return;
+    const startVal = travelDateInput.value;
+    const returnVal = returnDateInput.value;
+
+    if (startVal && returnVal) {
+      const startDate = new Date(startVal);
+      const endDate = new Date(returnVal);
+      const diffTime = endDate - startDate;
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+      if (diffDays >= 1 && diffDays <= 30) {
+        daysSlider.value = diffDays;
+        daysBadge.textContent = `${diffDays} Days`;
+      }
+    } else if (startVal && source === 'slider') {
+      const startDate = new Date(startVal);
+      const numDays = parseInt(daysSlider.value, 10) || 1;
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + numDays - 1);
+      returnDateInput.value = endDate.toISOString().split('T')[0];
+    }
+  }
+
+  if (travelDateInput) {
+    travelDateInput.addEventListener('change', () => syncDatesAndDuration('start'));
+  }
+  if (returnDateInput) {
+    returnDateInput.addEventListener('change', () => syncDatesAndDuration('return'));
+  }
+
   daysSlider.addEventListener('input', (e) => {
     daysBadge.textContent = `${e.target.value} Days`;
+    syncDatesAndDuration('slider');
   });
+
+  // --- Smart Multi-City Auto-Check & Hint Handler ---
+  const multiCityCheckbox = document.getElementById('multi_city');
+  const multiCityAutoHint = document.getElementById('multi-city-auto-hint');
+
+  function checkMultiCityAutoDetect() {
+    if (!citiesInput || !multiCityCheckbox) return;
+    const rawVal = citiesInput.value.trim();
+    const cityList = rawVal.split(',').map(c => c.trim()).filter(Boolean);
+
+    if (cityList.length > 1) {
+      multiCityCheckbox.checked = true;
+      if (multiCityAutoHint) {
+        multiCityAutoHint.textContent = `✨ Multi-City Trip Auto-Enabled! The AI will sequence ALL entered cities (${cityList.join(' ➔ ')}) across your itinerary.`;
+        multiCityAutoHint.style.display = 'block';
+      }
+    } else {
+      if (multiCityAutoHint) multiCityAutoHint.style.display = 'none';
+    }
+  }
+
+  if (citiesInput) {
+    citiesInput.addEventListener('input', checkMultiCityAutoDetect);
+    citiesInput.addEventListener('change', checkMultiCityAutoDetect);
+    checkMultiCityAutoDetect();
+  }
 
   budgetInput.addEventListener('input', () => {
     updateBudgetDisplay();
   });
+
+  // --- Group Expense Splitter Controller ---
+  const btnAddExpense = document.getElementById('btn-add-expense');
+  const splitItemName = document.getElementById('split-item-name');
+  const splitItemAmount = document.getElementById('split-item-amount');
+  const splitPaidBy = document.getElementById('split-paid-by');
+  const splitTableBody = document.getElementById('split-expenses-table-body');
+  const splitSummaryBox = document.getElementById('split-summary-box');
+
+  let groupExpenses = [];
+
+  function renderGroupExpenses() {
+    if (!splitTableBody) return;
+    if (groupExpenses.length === 0) {
+      splitTableBody.innerHTML = `
+        <tr>
+          <td colspan="4" style="padding: 12px; text-align: center; color: #64748b;">No group expenses added yet. Enter items above to calculate split settlements.</td>
+        </tr>
+      `;
+      if (splitSummaryBox) splitSummaryBox.style.display = 'none';
+      return;
+    }
+
+    splitTableBody.innerHTML = '';
+    let totalSpent = 0;
+    const paidByMap = {};
+
+    groupExpenses.forEach((exp, idx) => {
+      totalSpent += exp.amount;
+      paidByMap[exp.paidBy] = (paidByMap[exp.paidBy] || 0) + exp.amount;
+
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255,255,255,0.06)';
+      tr.innerHTML = `
+        <td style="padding: 8px; color: #f8fafc; font-weight: 600;">${escapeHtml(exp.name)}</td>
+        <td style="padding: 8px; color: #4ade80; font-weight: 700;">₹${exp.amount.toLocaleString('en-IN')}</td>
+        <td style="padding: 8px; color: #38bdf8;">${escapeHtml(exp.paidBy)}</td>
+        <td style="padding: 8px;">
+          <button type="button" style="background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; cursor: pointer;" onclick="deleteGroupExpense(${idx})">Delete</button>
+        </td>
+      `;
+      splitTableBody.appendChild(tr);
+    });
+
+    const people = Object.keys(paidByMap);
+    const numPeople = Math.max(1, people.length);
+    const perPersonShare = Math.round(totalSpent / numPeople);
+
+    let summaryText = `💰 <strong>Total Spent:</strong> ₹${totalSpent.toLocaleString('en-IN')} | <strong>Fair Share per Person (${numPeople} travelers):</strong> ₹${perPersonShare.toLocaleString('en-IN')}<br><div style="margin-top:6px;">`;
+    
+    people.forEach(p => {
+      const diff = paidByMap[p] - perPersonShare;
+      if (diff > 0) {
+        summaryText += `🟢 <strong>${p}</strong> gets back <span style="color:#4ade80;">₹${diff.toLocaleString('en-IN')}</span><br>`;
+      } else if (diff < 0) {
+        summaryText += `🔴 <strong>${p}</strong> owes <span style="color:#f87171;">₹${Math.abs(diff).toLocaleString('en-IN')}</span><br>`;
+      } else {
+        summaryText += `⚪ <strong>${p}</strong> is fully settled up!<br>`;
+      }
+    });
+    summaryText += `</div>`;
+
+    if (splitSummaryBox) {
+      splitSummaryBox.innerHTML = summaryText;
+      splitSummaryBox.style.display = 'block';
+    }
+  }
+
+  window.deleteGroupExpense = function(index) {
+    groupExpenses.splice(index, 1);
+    renderGroupExpenses();
+  };
+
+  if (btnAddExpense) {
+    btnAddExpense.onclick = () => {
+      const name = splitItemName.value.trim();
+      const amount = parseFloat(splitItemAmount.value);
+      const paidBy = splitPaidBy.value.trim() || 'Traveler';
+
+      if (!name || isNaN(amount) || amount <= 0) {
+        showToast('⚠️ Please enter a valid expense name and positive amount.');
+        return;
+      }
+
+      groupExpenses.push({ name, amount, paidBy });
+      splitItemName.value = '';
+      splitItemAmount.value = '';
+      renderGroupExpenses();
+      showToast(`✅ Added ₹${amount} expense paid by ${paidBy}!`);
+    };
+  }
 
   // --- Form Submit & CrewAI Kickoff ---
   form.addEventListener('submit', async (e) => {
@@ -430,7 +584,8 @@ document.addEventListener('DOMContentLoaded', () => {
       food_preference: getSelectedFood(),
       travel_style: travelStyleSelect.value,
       language: languageSelect ? languageSelect.value : 'en',
-      travel_date: document.getElementById('travel_date') ? document.getElementById('travel_date').value || null : null,
+      travel_date: travelDateInput ? travelDateInput.value || null : null,
+      return_date: returnDateInput ? returnDateInput.value || null : null,
       multi_city: document.getElementById('multi_city') ? document.getElementById('multi_city').checked : false,
     };
 
@@ -455,6 +610,7 @@ document.addEventListener('DOMContentLoaded', () => {
     startAgentProgressAnimation();
 
     try {
+      currentJobData = payload;
       const response = await fetch(`${API_BASE}/api/plan-trip`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -475,8 +631,15 @@ document.addEventListener('DOMContentLoaded', () => {
       // Poll ${API_BASE}/api/status/{job_id} every 3 seconds until completed or failed
       let jobStatus = initData.status || 'pending';
       let itineraryData = null;
+      const maxPollAttempts = 100; // Hard circuit breaker: 100 * 3s = 300s (5 minutes)
+      let pollAttempts = 0;
 
       while (jobStatus === 'pending' || jobStatus === 'running') {
+        pollAttempts++;
+        if (pollAttempts > maxPollAttempts) {
+          throw new Error('⏱️ Request timed out after 5 minutes. The server took longer than expected. Please try again.');
+        }
+
         await new Promise(resolve => setTimeout(resolve, 3000));
 
         const statusRes = await fetch(`${API_BASE}/api/status/${jobId}`);
@@ -747,10 +910,10 @@ document.addEventListener('DOMContentLoaded', () => {
     clearInterval(progressInterval);
     progressInterval = setInterval(() => {
       elapsed += 1;
-      if (elapsed === 10) {
+      if (elapsed === 3) {
         setAgentState(agent1Card, 'completed', 'Destination Selected');
         setAgentState(agent2Card, 'running', 'Scouting Local Guide & Food');
-      } else if (elapsed === 24) {
+      } else if (elapsed === 7) {
         setAgentState(agent2Card, 'completed', 'Attractions & Transit Curated');
         setAgentState(agent3Card, 'running', 'Structuring Final Itinerary');
       }
@@ -782,17 +945,19 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderItinerary(itinerary, userBudget, currencyCode) {
     if (!itinerary) return;
 
-    // Render Countdown Banner
-    const tDate = itinerary.travel_date || (currentJobData && currentJobData.travel_date);
+    // Render Countdown Banner with Departure & Return Dates
+    const tDate = itinerary.start_date || itinerary.travel_date || (currentJobData && currentJobData.travel_date);
+    const endDate = itinerary.end_date;
     const cBanner = document.getElementById('countdown-banner');
     const cText = document.getElementById('countdown-text');
     if (tDate && cBanner && cText) {
       const today = new Date(); today.setHours(0,0,0,0);
       const target = new Date(tDate); target.setHours(0,0,0,0);
       const diffDays = Math.ceil((target - today) / 86400000);
-      if (diffDays > 0) cText.textContent = `🗓️ ${diffDays} day${diffDays === 1 ? '' : 's'} until your trip! (${tDate})`;
-      else if (diffDays === 0) cText.textContent = `✈️ Your trip starts today! (${tDate})`;
-      else cText.textContent = `✈️ Trip took place on ${tDate}`;
+      const rangeLabel = endDate ? `Departure: ${tDate} • Return: ${endDate}` : `Departure: ${tDate}`;
+      if (diffDays > 0) cText.textContent = `🗓️ ${diffDays} day${diffDays === 1 ? '' : 's'} until your trip starts! (${rangeLabel})`;
+      else if (diffDays === 0) cText.textContent = `✈️ Your trip starts today! (${rangeLabel})`;
+      else cText.textContent = `✈️ Trip departure was on ${tDate} (${rangeLabel})`;
       cBanner.style.display = 'block';
     } else if (cBanner) {
       cBanner.style.display = 'none';
@@ -824,7 +989,7 @@ document.addEventListener('DOMContentLoaded', () => {
     destCountry.innerHTML = `📍 ${country ? country : 'India'}`;
     totalCostBadge.textContent = formatMoney(totalCost, activeCurrency);
 
-    // Quick Action Links (Google Maps, IRCTC/Trains, Flights)
+    // Quick Action Links (Google Maps, IRCTC/Trains, Flights, WhatsApp Share)
     destActionsBar.innerHTML = `
       <a href="https://www.google.com/maps/search/${encodeURIComponent(city)}" target="_blank" rel="noopener" class="dest-action-link">
         🗺️ Google Maps
@@ -837,17 +1002,206 @@ document.addEventListener('DOMContentLoaded', () => {
           🚆 IRCTC / Trains
         </a>
       ` : ''}
+      <button type="button" id="btn-share-whatsapp" class="dest-action-link" style="background: linear-gradient(135deg, #25D366, #128C7E); color: white; border: none; cursor: pointer; font-weight: 700;">
+        📲 Share to WhatsApp
+      </button>
     `;
+
+    const btnWhatsapp = document.getElementById('btn-share-whatsapp');
+    if (btnWhatsapp) {
+      btnWhatsapp.onclick = () => {
+        let msg = `✈️ *AI TRIP PLANNER ITINERARY*\n`;
+        msg += `📍 *Destination:* ${city}\n`;
+        if (itinerary.start_date && itinerary.end_date) {
+          msg += `📅 *Dates:* ${itinerary.start_date} to ${itinerary.end_date} (${days.length} Days)\n`;
+        } else {
+          msg += `📅 *Duration:* ${days.length} Days\n`;
+        }
+        msg += `💰 *Estimated Spend:* ${formatMoney(totalCost, activeCurrency)}\n`;
+        if (itinerary.recommended_stay && itinerary.recommended_stay.name) {
+          msg += `🏨 *Stay:* ${itinerary.recommended_stay.name}\n`;
+        }
+        msg += `\n*Daily Schedule Highlights:*\n`;
+        days.slice(0, 4).forEach((d, idx) => {
+          msg += `• *Day ${idx + 1} (${d.city || city}):* ${d.theme || 'Exploration'}\n`;
+        });
+        msg += `\nView complete itinerary online: ${window.location.origin}`;
+        const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
+        window.open(waUrl, '_blank');
+      };
+    }
+
+    // --- Render Interactive Leaflet Map ---
+    const renderMap = () => {
+      const mapContainer = document.getElementById('map-container');
+      if (!mapContainer || typeof L === 'undefined') return;
+
+      if (window.activeTripMap) {
+        window.activeTripMap.remove();
+        window.activeTripMap = null;
+      }
+
+      const cityCoords = {
+        'tirupati': [13.6288, 79.4192],
+        'vijayawada': [16.5062, 80.6480],
+        'nellore': [14.4426, 79.9865],
+        'nellor': [14.4426, 79.9865],
+        'goa': [15.2993, 74.1240],
+        'gokarna': [14.5479, 74.3188],
+        'mumbai': [19.0760, 72.8777],
+        'bengaluru': [12.9716, 77.5946],
+        'hyderabad': [17.3850, 78.4867],
+        'chennai': [13.0827, 80.2707],
+        'delhi': [28.6139, 77.2090],
+        'munnar': [10.0889, 77.0595],
+        'kochi': [9.9312, 76.2673],
+        'jaipur': [26.9124, 75.7873],
+        'udaipur': [24.5854, 73.7125],
+        'varanasi': [25.3176, 82.9739],
+        'rishikesh': [30.0869, 78.2676],
+        'manali': [32.2432, 77.1892],
+        'shimla': [31.1048, 77.1734],
+        'agra': [27.1767, 78.0081]
+      };
+
+      let baseCity = (city || 'vijayawada').toLowerCase().trim();
+      let coords = cityCoords[baseCity] || [16.5062, 80.6480];
+
+      const map = L.map('map-container').setView(coords, 10);
+      window.activeTripMap = map;
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 18
+      }).addTo(map);
+
+      const routeLatLngs = [];
+
+      const citiesList = itinerary.cities_visited || [city];
+      citiesList.forEach((cName, idx) => {
+        const cKey = cName.toLowerCase().trim();
+        const cPos = cityCoords[cKey] || [coords[0] + (idx * 0.15), coords[1] + (idx * 0.15)];
+        routeLatLngs.push(cPos);
+
+        L.marker(cPos).addTo(map)
+          .bindPopup(`<b>📍 ${escapeHtml(cName)}</b><br>Destination Stop ${idx + 1} on your itinerary`)
+          .openPopup();
+      });
+
+      if (routeLatLngs.length > 1) {
+        const polyline = L.polyline(routeLatLngs, { color: '#38bdf8', weight: 4, opacity: 0.85, dashArray: '8, 8' }).addTo(map);
+        map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
+      }
+    };
+
+    setTimeout(renderMap, 300);
+
+    // Render Inter-City Transit Recommendation Card (Multi-Leg & Single-Leg Support)
+    const intercityCard = document.getElementById('intercity-transit-card');
+    if (intercityCard) {
+      const it = itinerary.intercity_transport;
+      const legs = (it && it.route_legs && Array.isArray(it.route_legs) && it.route_legs.length > 0) ? it.route_legs : null;
+
+      if (legs && legs.length > 0) {
+        const titleEl = intercityCard.querySelector('h3');
+        if (titleEl) titleEl.textContent = `🚀 Inter-City Travel & Route Guide (${legs.length} Sequential Journey Legs)`;
+        const originName = (currentJobData && currentJobData.origin) ? currentJobData.origin : 'Origin';
+        const routeText = document.getElementById('intercity-route-text');
+        if (routeText) routeText.textContent = `(${originName} ➔ ${(itinerary.cities_visited || [city]).join(' ➔ ')})`;
+
+        let multiHTML = `
+          <div style="font-size: 0.88rem; color: #94a3b8; margin-bottom: 14px;">
+            ✨ Recommended sequential transit connections for every destination stop in your itinerary:
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px;">
+            ${legs.map((leg, idx) => `
+              <div style="background: rgba(15, 23, 42, 0.6); padding: 14px 16px; border-radius: 10px; border: 1px solid rgba(56, 189, 248, 0.3);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <span style="font-size: 0.85rem; font-weight: 700; color: #38bdf8; background: rgba(56,189,248,0.15); padding: 2px 10px; border-radius: 8px;">
+                    Leg ${idx + 1}: ${escapeHtml(leg.route_title || (leg.from_city + ' ➔ ' + leg.to_city))}
+                  </span>
+                  <span style="font-size: 0.78rem; font-weight: 700; color: #4ade80;">${formatMoney(leg.estimated_cost_per_person || 150, activeCurrency)} / person</span>
+                </div>
+                <div style="font-weight: 700; color: #f8fafc; font-size: 0.95rem; margin-bottom: 4px;">
+                  🚆 ${escapeHtml(leg.recommended_option || 'Intercity Express Transit')}
+                </div>
+                <div style="font-size: 0.8rem; color: #cbd5e1; margin-bottom: 6px;">
+                  ⏱️ <strong>Duration:</strong> ${escapeHtml(leg.travel_duration || '3 hrs')}
+                </div>
+                <div style="font-size: 0.82rem; color: #94a3b8; line-height: 1.4;">
+                  ${escapeHtml(leg.why_recommended || '')}
+                </div>
+                <div style="font-size: 0.78rem; color: #38bdf8; margin-top: 6px; background: rgba(56,189,248,0.08); padding: 6px 8px; border-radius: 6px;">
+                  🚏 <strong>Station Connection:</strong> ${escapeHtml(leg.local_connect_tips || 'Prepaid auto or cab to hotel.')}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+
+        // Update body or container
+        const optionText = document.getElementById('intercity-option-text');
+        if (optionText) {
+          const parentGrid = optionText.closest('.metric-card-body') || intercityCard;
+          parentGrid.innerHTML = multiHTML;
+        } else {
+          intercityCard.innerHTML = `
+            <div class="metric-card-header">
+              <h3 style="margin: 0; font-size: 1.1rem; color: #f8fafc;">🚀 Inter-City Travel & Route Guide (${legs.length} Sequential Journey Legs)</h3>
+            </div>
+            <div style="padding: 16px;">${multiHTML}</div>
+          `;
+        }
+        intercityCard.style.display = 'block';
+      } else if (it && (it.recommended_option || it.mode)) {
+        const originName = (currentJobData && currentJobData.origin) ? currentJobData.origin : '';
+        const routeText = document.getElementById('intercity-route-text');
+        const modeBadge = document.getElementById('intercity-mode-badge');
+        const optionText = document.getElementById('intercity-option-text');
+        const costText = document.getElementById('intercity-cost-text');
+        const durationText = document.getElementById('intercity-duration-text');
+        const whyText = document.getElementById('intercity-why-text');
+        const connectText = document.getElementById('intercity-connect-text');
+
+        let actualMode = (it.mode || 'Transit').trim();
+        if (it.recommended_option && /flight|indigo|air india|akasa|spicejet/i.test(it.recommended_option)) {
+          actualMode = 'Flight';
+        } else if (it.recommended_option && /train|express|vande bharat|shatabdi|superfast|irctc/i.test(it.recommended_option)) {
+          actualMode = 'Train';
+        } else if (it.recommended_option && /bus|volvo|ksrtc|apsrtc|redbus/i.test(it.recommended_option)) {
+          actualMode = 'Bus';
+        }
+        const modeIcon = actualMode.toLowerCase() === 'flight' ? '✈️' : (actualMode.toLowerCase() === 'bus' ? '🚌' : '🚆');
+
+        if (routeText) routeText.textContent = originName ? `(${originName} ➔ ${city})` : `(to ${city})`;
+        if (modeBadge) modeBadge.textContent = `${modeIcon} ${actualMode} Recommended`;
+        if (optionText) optionText.textContent = it.recommended_option || 'Direct Route Options';
+        if (costText) costText.textContent = it.estimated_cost_per_person ? formatMoney(it.estimated_cost_per_person, activeCurrency) + " / person" : 'Varies by class';
+        if (durationText) durationText.textContent = it.travel_duration || 'Standard Transit Time';
+        if (whyText) whyText.innerHTML = `<strong>Why Recommended:</strong> ${escapeHtml(it.why_recommended || '')}`;
+        if (connectText) connectText.innerHTML = `<strong>🚏 Arrival & Hotel Connection:</strong> ${escapeHtml(it.local_connect_tips || 'Take local app-cab or station prepaid auto to your accommodation.')}`;
+
+        intercityCard.style.display = 'block';
+      } else {
+        intercityCard.style.display = 'none';
+      }
+    }
 
     // Budget Balance calculation
     const remaining = userBudget - totalCost;
     if (remaining >= 0) {
       budgetRatioVal.textContent = `${formatMoney(remaining, activeCurrency)} left`;
       budgetRatioVal.className = 'metric-value highlight';
+      budgetRatioVal.style.color = '#4ade80';
     } else {
       budgetRatioVal.textContent = `${formatMoney(Math.abs(remaining), activeCurrency)} over`;
       budgetRatioVal.className = 'metric-value';
-      budgetRatioVal.style.color = 'var(--accent-pink)';
+      budgetRatioVal.style.color = '#f87171';
+
+      if (!itinerary.budget_alert && bBanner && bText) {
+        bText.textContent = `⚠️ Estimated trip cost (${formatMoney(totalCost, activeCurrency)}) exceeds your target budget (${formatMoney(userBudget, activeCurrency)}) by ${formatMoney(Math.abs(remaining), activeCurrency)}.`;
+        bBanner.style.display = 'block';
+      }
     }
 
     // Render Highlights: Food
@@ -855,7 +1209,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Gather food items from day descriptions or guide
     const foodKeywords = [];
     days.forEach(d => {
-      const texts = [d.morning, d.afternoon, d.evening].filter(Boolean).join(' ');
+      const texts = [d.morning, d.afternoon, d.evening, d.night].filter(Boolean).join(' ');
       const matches = texts.match(/(?:try|eat|dinner at|lunch at|snack on|delicacy|taste)\s+([^.,;]+)/gi);
       if (matches) {
         matches.forEach(m => foodKeywords.push(m.trim()));
@@ -928,7 +1282,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="day-card-header">
           <div class="day-tag-title">
             <span class="day-num-pill">Day ${dayNum}</span>
-            <span class="day-theme-text">${escapeHtml(theme)}</span>
+            ${day.date ? `<span class="day-date-pill" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 4px;">🗓️ ${escapeHtml(day.date)}</span>` : ''}
+            <span class="day-theme-text" style="margin-left: 6px;">${escapeHtml(theme)}</span>
             ${day.city ? `<span class="day-city-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 6px;">📍 ${escapeHtml(day.city)}</span>` : ''}
           </div>
           <div class="day-meta">
@@ -943,18 +1298,23 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>` : ''}
           ${day.morning ? `
             <div class="activity-block">
-              <div class="time-slot-label">🌅 Morning</div>
+              <div class="time-slot-label">🌅 Morning (Breakfast / Fresh Up / Sightseeing)</div>
               <div class="activity-desc">${escapeHtml(day.morning)}</div>
             </div>` : ''}
           ${day.afternoon ? `
             <div class="activity-block">
-              <div class="time-slot-label">☀️ Afternoon</div>
+              <div class="time-slot-label">☀️ Afternoon (Regional Lunch & Sights)</div>
               <div class="activity-desc">${escapeHtml(day.afternoon)}</div>
             </div>` : ''}
           ${day.evening ? `
             <div class="activity-block">
-              <div class="time-slot-label">🌙 Evening</div>
+              <div class="time-slot-label">🌆 Evening (Tea / Snacks & Markets)</div>
               <div class="activity-desc">${escapeHtml(day.evening)}</div>
+            </div>` : ''}
+          ${day.night ? `
+            <div class="activity-block" style="border-left-color: #a855f7;">
+              <div class="time-slot-label" style="color: #c084fc;">🌙 Night (Famous Dinner & Stroll)</div>
+              <div class="activity-desc">${escapeHtml(day.night)}</div>
             </div>` : ''}
         </div>
       `;
@@ -1131,7 +1491,103 @@ document.addEventListener('DOMContentLoaded', () => {
       dtCard.style.display = 'none';
     }
 
-    // Render Recommended Stay
+    // Render Local City Commute & Vehicle Rental Options (Multi-City & City-Specific)
+    const localCommuteCard = document.getElementById('local-commute-card');
+    if (localCommuteCard) {
+      const cityList = (itinerary.cities_visited && itinerary.cities_visited.length > 0) ? itinerary.cities_visited : [city];
+      
+      const cityCommuteDb = {
+        'tirupati': {
+          bike: '₹350 - ₹500 / day',
+          bikeTip: 'Rentals available near Railway Station & Alipiri checkpost. Helmet mandatory.',
+          auto: '₹400 - ₹700 / day',
+          autoTip: 'Shared & private autos connect station, Alipiri, & Tirumala uphill buses.',
+          bus: '₹30 - ₹80 / day',
+          busTip: 'APSRTC Free & express buses frequent Alipiri & temple routes.',
+          cab: '₹1,600 - ₹2,200 / day',
+          cabTip: 'Prepaid AC cabs for temple tour (Kanipakam, Srikalahasti, Chandragiri).'
+        },
+        'vijayawada': {
+          bike: '₹450 - ₹650 / day',
+          bikeTip: 'Available near Junction Station & PNBS Bus Stand.',
+          auto: '₹500 - ₹800 / day',
+          autoTip: 'Ola, Uber & meter autos connect Kanaka Durga Temple, Prakasam Barrage & Undavalli.',
+          bus: '₹50 - ₹100 / day',
+          busTip: 'APSRTC Metro Express city buses cover Besant Road & Benz Circle.',
+          cab: '₹1,800 - ₹2,500 / day',
+          cabTip: 'Full day AC cab recommended for Amaravati & Mangalagiri trips.'
+        },
+        'nellore': {
+          bike: '₹400 - ₹550 / day',
+          bikeTip: 'Available near RTC Complex & Atmakur Bus Stand.',
+          auto: '₹450 - ₹750 / day',
+          autoTip: 'Local autos connect Ranganathaswamy Temple & Penna riverfront.',
+          bus: '₹40 - ₹90 / day',
+          busTip: 'Frequent RTC buses connecting city center to Mypadu Beach.',
+          cab: '₹1,700 - ₹2,300 / day',
+          cabTip: 'AC Sedan cab recommended for 25km scenic Mypadu Beach drive.'
+        }
+      };
+
+      let commuteHTML = `
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #c084fc; font-size: 1.1rem;">
+            <span>🚗</span> Local City Commute & Vehicle Rental Options (${cityList.length} Visited Cities)
+          </div>
+          <span style="font-size: 0.78rem; font-weight: 600; padding: 3px 10px; border-radius: 12px; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">
+            City-Specific Comparison
+          </span>
+        </div>
+      `;
+
+      cityList.forEach(cName => {
+        const cKey = cName.toLowerCase().trim();
+        const info = cityCommuteDb[cKey] || {
+          bike: '₹400 - ₹600 / day',
+          bikeTip: `Best for solo travelers exploring ${escapeHtml(cName)} market streets.`,
+          auto: '₹500 - ₹800 / day',
+          autoTip: `Point-to-point autos & app cabs connecting ${escapeHtml(cName)} sights.`,
+          bus: '₹50 - ₹120 / day',
+          busTip: `City bus pass for budget transit across ${escapeHtml(cName)}.`,
+          cab: '₹1,800 - ₹2,500 / day',
+          cabTip: `Full-day AC cab for relaxed family sightseeing in ${escapeHtml(cName)}.`
+        };
+
+        commuteHTML += `
+          <div style="margin-bottom: 20px;">
+            <div style="font-size: 0.95rem; font-weight: 700; color: #e9d5ff; margin-bottom: 10px; padding-bottom: 4px; border-bottom: 1px dashed rgba(168,85,247,0.3);">
+              📍 City Local Commute Rates: <strong>${escapeHtml(cName)}</strong>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+              <div style="background: rgba(15, 23, 42, 0.6); padding: 14px; border-radius: 10px; border: 1px solid rgba(168, 85, 247, 0.2);">
+                <div style="font-weight: 700; color: #e9d5ff; font-size: 0.88rem; margin-bottom: 4px;">🛵 Scooter / Bike (${escapeHtml(cName)})</div>
+                <div style="font-size: 1.05rem; font-weight: 800; color: #c084fc;">${info.bike}</div>
+                <p style="font-size: 0.78rem; color: #cbd5e1; margin-top: 6px; line-height: 1.35;">${escapeHtml(info.bikeTip)}</p>
+              </div>
+              <div style="background: rgba(15, 23, 42, 0.6); padding: 14px; border-radius: 10px; border: 1px solid rgba(168, 85, 247, 0.2);">
+                <div style="font-weight: 700; color: #e9d5ff; font-size: 0.88rem; margin-bottom: 4px;">🛺 Auto / App Cabs (${escapeHtml(cName)})</div>
+                <div style="font-size: 1.05rem; font-weight: 800; color: #c084fc;">${info.auto}</div>
+                <p style="font-size: 0.78rem; color: #cbd5e1; margin-top: 6px; line-height: 1.35;">${escapeHtml(info.autoTip)}</p>
+              </div>
+              <div style="background: rgba(15, 23, 42, 0.6); padding: 14px; border-radius: 10px; border: 1px solid rgba(168, 85, 247, 0.2);">
+                <div style="font-weight: 700; color: #e9d5ff; font-size: 0.88rem; margin-bottom: 4px;">🚌 City Bus Pass (${escapeHtml(cName)})</div>
+                <div style="font-size: 1.05rem; font-weight: 800; color: #c084fc;">${info.bus}</div>
+                <p style="font-size: 0.78rem; color: #cbd5e1; margin-top: 6px; line-height: 1.35;">${escapeHtml(info.busTip)}</p>
+              </div>
+              <div style="background: rgba(15, 23, 42, 0.6); padding: 14px; border-radius: 10px; border: 1px solid rgba(168, 85, 247, 0.2);">
+                <div style="font-weight: 700; color: #e9d5ff; font-size: 0.88rem; margin-bottom: 4px;">🚘 Full-Day Cab (${escapeHtml(cName)})</div>
+                <div style="font-size: 1.05rem; font-weight: 800; color: #c084fc;">${info.cab}</div>
+                <p style="font-size: 0.78rem; color: #cbd5e1; margin-top: 6px; line-height: 1.35;">${escapeHtml(info.cabTip)}</p>
+              </div>
+            </div>
+          </div>
+        `;
+      });
+
+      localCommuteCard.innerHTML = commuteHTML;
+    }
+
+    // Render Recommended Stay (Multi-City & Single-City Support)
     const stayCard = document.getElementById('stay-card');
     const stayTierBadge = document.getElementById('stay-tier-badge');
     const stayNameText = document.getElementById('stay-name-text');
@@ -1139,23 +1595,49 @@ document.addEventListener('DOMContentLoaded', () => {
     const stayAreaText = document.getElementById('stay-area-text');
     const stayWhyText = document.getElementById('stay-why-text');
 
+    const recStays = itinerary.recommended_stays;
     const recStay = itinerary.recommended_stay;
-    if (recStay) {
-      if (stayTierBadge) stayTierBadge.textContent = recStay.category || 'Budget-Matched Stay';
-      if (stayNameText) stayNameText.textContent = recStay.name || 'Top-Rated Accommodation';
-      if (stayPriceText) stayPriceText.textContent = `${formatMoney(recStay.estimated_price_per_night || (userBudget * 0.25 / (itinerary.trip_length_days || 1)), activeCurrency)} / night`;
-      if (stayAreaText) stayAreaText.textContent = `📍 ${recStay.address_or_area || (city + ' Central')}`;
-      if (stayWhyText) stayWhyText.textContent = recStay.why_recommended || `Matches your budget tier perfectly while keeping you accessible to main sights.`;
-      if (stayCard) stayCard.classList.remove('hidden');
-    } else {
-      let fallbackCat = userBudget <= 5000 ? 'Budget Hostel / Homestay' : (userBudget <= 25000 ? 'Comfort 3-Star Hotel' : 'Luxury 5-Star Hotel');
-      let approxStayPrice = Math.round((userBudget * 0.28) / (itinerary.trip_length_days || 1));
-      if (stayTierBadge) stayTierBadge.textContent = fallbackCat;
-      if (stayNameText) stayNameText.textContent = `${city} Recommended ${fallbackCat}`;
-      if (stayPriceText) stayPriceText.textContent = `${formatMoney(approxStayPrice, activeCurrency)} / night`;
-      if (stayAreaText) stayAreaText.textContent = `📍 ${city} Prime Area`;
-      if (stayWhyText) stayWhyText.textContent = `Carefully selected stay matched to your overall budget of ${formatMoney(userBudget, activeCurrency)}.`;
-      if (stayCard) stayCard.classList.remove('hidden');
+
+    if (stayCard) {
+      const stayBody = stayCard.querySelector('.stay-card-body');
+      if (recStays && Array.isArray(recStays) && recStays.length > 1) {
+        const titleEl = stayCard.querySelector('h3');
+        if (titleEl) titleEl.textContent = 'Recommended Accommodation (Multi-City Stays for All Destinations)';
+        if (stayBody) {
+          stayBody.innerHTML = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px;">
+              ${recStays.map(s => `
+                <div style="background: rgba(15, 23, 42, 0.6); padding: 16px; border-radius: 10px; border: 1px solid rgba(56, 189, 248, 0.3);">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-size: 0.8rem; font-weight: 700; color: #38bdf8; background: rgba(56,189,248,0.15); padding: 2px 8px; border-radius: 6px;">📍 ${escapeHtml(s.city || city)}</span>
+                    <span style="font-size: 0.78rem; color: #4ade80; font-weight: 700;">${formatMoney(s.estimated_price_per_night || 800, activeCurrency)} / night</span>
+                  </div>
+                  <h4 style="font-size: 1.02rem; font-weight: 700; color: #f8fafc; margin: 6px 0 4px 0;">${escapeHtml(s.name)}</h4>
+                  <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 6px;">${escapeHtml(s.address_or_area || 'Central Hub')}</div>
+                  <p style="font-size: 0.82rem; color: #cbd5e1; margin: 0; line-height: 1.4;">${escapeHtml(s.why_recommended || 'Comfortable budget accommodation.')}</p>
+                </div>
+              `).join('')}
+            </div>
+          `;
+        }
+        stayCard.classList.remove('hidden');
+      } else if (recStay) {
+        if (stayTierBadge) stayTierBadge.textContent = recStay.category || 'Budget-Matched Stay';
+        if (stayNameText) stayNameText.textContent = recStay.name || 'Top-Rated Accommodation';
+        if (stayPriceText) stayPriceText.textContent = `${formatMoney(recStay.estimated_price_per_night || (userBudget * 0.25 / (itinerary.trip_length_days || 1)), activeCurrency)} / night`;
+        if (stayAreaText) stayAreaText.textContent = `📍 ${recStay.address_or_area || (city + ' Central')}`;
+        if (stayWhyText) stayWhyText.textContent = recStay.why_recommended || `Matches your budget tier perfectly while keeping you accessible to main sights.`;
+        if (stayCard) stayCard.classList.remove('hidden');
+      } else {
+        let fallbackCat = userBudget <= 5000 ? 'Budget Hostel / Homestay' : (userBudget <= 25000 ? 'Comfort 3-Star Hotel' : 'Luxury 5-Star Hotel');
+        let approxStayPrice = Math.round((userBudget * 0.28) / (itinerary.trip_length_days || 1));
+        if (stayTierBadge) stayTierBadge.textContent = fallbackCat;
+        if (stayNameText) stayNameText.textContent = `${city} Recommended ${fallbackCat}`;
+        if (stayPriceText) stayPriceText.textContent = `${formatMoney(approxStayPrice, activeCurrency)} / night`;
+        if (stayAreaText) stayAreaText.textContent = `📍 ${city} Prime Area`;
+        if (stayWhyText) stayWhyText.textContent = `Carefully selected stay matched to your overall budget of ${formatMoney(userBudget, activeCurrency)}.`;
+        if (stayCard) stayCard.classList.remove('hidden');
+      }
     }
 
     // Render Smart Budget Upgrades (+₹2,000 to ₹3,000)
@@ -1170,7 +1652,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const upgradeAmt = upgrades ? (upgrades.extra_amount || 2500) : 2500;
     const formattedUpgradeAmt = formatMoney(upgradeAmt, activeCurrency);
 
-    if (upgradeAmountBadge) upgradeAmountBadge.textContent = `+${formattedUpgradeAmt} Extra`;
+    if (upgradeAmountBadge) {
+      upgradeAmountBadge.textContent = `+${formattedUpgradeAmt} Apply Budget Upgrade ⚡`;
+      upgradeAmountBadge.onclick = () => {
+        const curBudget = parseFloat(budgetInput.value) || userBudget || 5000;
+        const newBudget = curBudget + upgradeAmt;
+        budgetInput.value = newBudget;
+        updateBudgetDisplay();
+        budgetInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        budgetInput.focus();
+        showToast(`⚡ Applied +${formattedUpgradeAmt} Budget Upgrade! Click "Plan Trip" to see your upgraded luxury itinerary.`);
+      };
+    }
 
     if (upgrades) {
       if (upgradeHotelText) upgradeHotelText.textContent = upgrades.hotel_upgrade || `Upgrade your stay to a higher-rated boutique hotel with free breakfast.`;
@@ -1184,6 +1677,47 @@ document.addEventListener('DOMContentLoaded', () => {
       if (upgradeTipText) upgradeTipText.innerHTML = `<strong>Concierge Advice:</strong> If you increase your budget by just <strong>+${formattedUpgradeAmt}</strong>, you unlock private rooms, iconic dining, and hassle-free transit in ${city}!`;
     }
     if (upgradeCard) upgradeCard.classList.remove('hidden');
+
+    // Render Smart Trip Duration Extension Insights Card
+    const extCard = document.getElementById('duration-extension-card');
+    const extCardTitle = document.getElementById('ext-card-title');
+    const extCardSubtitle = document.getElementById('ext-card-subtitle');
+    const extApplyBtn = document.getElementById('ext-apply-btn');
+    const extAttractionsText = document.getElementById('ext-attractions-text');
+    const extFoodText = document.getElementById('ext-food-text');
+    const extPaceText = document.getElementById('ext-pace-text');
+    const extTipText = document.getElementById('ext-tip-text');
+
+    const curLength = itinerary.trip_length_days || parseInt(daysSlider.value, 10) || 4;
+    const extInsight = itinerary.duration_extension_insights;
+    const addDays = extInsight ? (extInsight.suggested_extra_days || 2) : 2;
+    const newLength = curLength + addDays;
+
+    if (extCardTitle) extCardTitle.textContent = `Smart Trip Extension (Extend from ${curLength} Days ➔ ${newLength} Days)`;
+    if (extCardSubtitle) extCardSubtitle.textContent = `Discover what extra sights, food gems, and relaxed pacing you unlock by adding +${addDays} days:`;
+    if (extApplyBtn) {
+      extApplyBtn.textContent = `+${addDays} Days Extension 🚀`;
+      extApplyBtn.onclick = () => {
+        daysSlider.value = newLength;
+        daysBadge.textContent = `${newLength} Days`;
+        syncDatesAndDuration('slider');
+        daysSlider.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        showToast(`⚡ Trip extended to ${newLength} Days! Click "Plan Trip" to generate your expanded itinerary.`);
+      };
+    }
+
+    if (extInsight) {
+      if (extAttractionsText) extAttractionsText.textContent = extInsight.unlocked_attractions;
+      if (extFoodText) extFoodText.textContent = extInsight.unlocked_food;
+      if (extPaceText) extPaceText.textContent = extInsight.pace_benefit;
+      if (extTipText) extTipText.innerHTML = `<strong>Concierge Recommendation:</strong> ${escapeHtml(extInsight.summary_tip)}`;
+    } else {
+      if (extAttractionsText) extAttractionsText.textContent = `Explore 4 additional iconic landmarks and hidden nature spots without rushing.`;
+      if (extFoodText) extFoodText.textContent = `Savor signature thalis, authentic street food lanes, and famous regional dessert spots.`;
+      if (extPaceText) extPaceText.textContent = `Reduces schedule stress from 4 rushed sights/day to a comfortable 2 sights/day with zero hurry.`;
+      if (extTipText) extTipText.innerHTML = `<strong>Concierge Recommendation:</strong> Extending your trip by +${addDays} days transforms your holiday into a rich, memorable, and relaxed experience!`;
+    }
+    if (extCard) extCard.style.display = 'block';
 
     // Render Similar Travelers Also Visited Recommendations
     const loadRecommendations = async () => {

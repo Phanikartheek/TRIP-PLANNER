@@ -47,8 +47,12 @@ def main():
     # Launch browser automatically
     threading.Thread(target=open_browser, daemon=True).start()
 
+    print("Importing uvicorn and app...", flush=True)
     import uvicorn
-    uvicorn.run("trip_planner.api.app:app", host="127.0.0.1", port=8000, log_level="info")
+    print("Importing FastAPI app from backend...", flush=True)
+    from trip_planner.api.app import app
+    print("Starting Uvicorn server on http://127.0.0.1:8000 ...", flush=True)
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
 
 if __name__ == "__main__":
     main()

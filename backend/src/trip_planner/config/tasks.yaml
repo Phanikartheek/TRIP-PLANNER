@@ -1,106 +1,34 @@
 select_city_task:
   description: >-
-    Compare these candidate cities: {cities}. The traveler is departing
-    from {origin}, planning a {trip_length}-day trip, with interests in
-    {interests} and a total budget of {budget}. Search the web for
-    current weather/seasonal conditions (including Indian seasons/monsoons where applicable)
-    and typical daily costs in the traveler's stated budget currency for each candidate before deciding.
-    
-    MULTI-CITY ROUTING INSTRUCTIONS:
-    If multiple candidate cities are listed in {cities} for a multi-city trip, sequence ALL listed cities into an ordered travel route (e.g. ["Goa", "Gokarna"]).
-    Set `city` to the FIRST city in the route (e.g. "Goa"), and set `cities_visited` to the full ordered list of cities (e.g. ["Goa", "Gokarna"]).
-    If only one candidate city is specified, set `city` to that city and `cities_visited` to null.
+    Compare candidate cities: {cities}. Traveler is departing from {origin} for a {trip_length}-day trip with interests in {interests} and budget of {budget}.
+    Search web for weather/seasonal conditions and typical daily costs before deciding.
+    If multiple candidate cities are in {cities}, sequence them into an ordered route; set `city` to the FIRST city and `cities_visited` to the ordered list. Otherwise set `city` to that city and `cities_visited` to null.
   expected_output: >-
-    A single recommended primary city with its country, a clear justification
-    referencing the traveler's interests and budget, the best time/season to
-    visit, the currency code, an estimated daily budget, and cities_visited if multi-city.
+    A single recommended primary city with country, justification, best time to visit, currency code, estimated daily budget, and cities_visited if multi-city.
   agent: city_selector
 
 gather_city_info_task:
   description: >-
-    For the city/cities chosen in the previous task, research and compile:
-    the top attractions matched to the traveler's interests ({interests}),
-    notable local food/restaurants (including regional specialties and dietary preferences),
-    safety notes a visitor should know, and practical transportation tips (airport/railway station transfers,
-    local cabs, trains, metros, or scooter rentals). Use web search to ground this in current information.
-    
-    SEARCH-GROUNDED EMERGENCY CONTACTS, EVENTS, & DAY-TRIPS RESEARCH:
-    1. Emergency info: Run web search queries for "hospital near {cities}" and "police station near {cities}". If search results return specific, real, verified hospital and police station names with their area/neighborhood, populate `emergency_info` (`nearest_hospital`, `nearest_police_station`, `national_emergency_number`: "112", `grounded`: true). Otherwise set `grounded: false` and locations to null.
-    2. Local events & festivals: Run web search queries for "festivals events {cities}". If real events/festivals are found in search results (prioritizing travel date if set, or major annual regional festivals), populate `local_events` (name, date_or_period, description) and set `events_grounded: true`. If search yields no concrete results, set `events_grounded: false` and `local_events` to null instead of inventing fake events.
-    3. Nearby day trips: Run web search queries for "day trips excursions near {cities}". If real, verifiable places within a 1-2 hour travel distance (15-80 km) are found, populate `nearby_day_trips` (name, distance_from_destination, why_visit). If no real candidate places are found, set `nearby_day_trips` to null.
+    Research chosen city/cities: top attractions matching {interests}, local food/restaurants, safety notes, and practical transit options.
+    Use web search to ground info:
+    1. Emergency info: Populate `emergency_info` (`nearest_hospital`, `nearest_police_station`, `national_emergency_number`: "112", `grounded`: true).
+    2. Local events & festivals: Populate `local_events` (name, date_or_period, description, `events_grounded`: true).
+    3. Nearby day trips: Populate `nearby_day_trips` (name, distance_from_destination, why_visit).
   expected_output: >-
-    A structured city guide: top attractions, local food recommendations, safety notes,
-    seasonal weather advice, transportation tips, emergency_info, local_events (with events_grounded flag),
-    and nearby_day_trips.
+    Structured city guide: top attractions, local food, safety, weather advice, transit tips, emergency_info, local_events, and nearby_day_trips.
   agent: local_expert
   context:
     - select_city_task
 
 plan_itinerary_task:
   description: >-
-    Using the city selection and the local city guide already gathered,
-    build a day-by-day itinerary for the full {trip_length}-day trip.
-    Each day must have a theme, and a morning/afternoon/evening plan.
-    Ground activity choices in the attractions and food already researched.
-    ALWAYS specify real, famous, iconic spots by name (e.g., exact well-known restaurants with must-try signature dishes, trending cafes, popular shopping malls/cinemas, and scenic landmarks) rather than generic descriptions.
-    CONCISE WRITING STYLE & TOKEN BOUNDS: Keep morning, afternoon, and evening descriptions crisp, engaging, and concise (under 80 words per time slot). Avoid overly verbose bulleted lists within a single field so that the JSON tool call remains compact and fully valid.
-    For EACH day, provide an itemized line-item expense breakdown in cost_breakdown (e.g. [{"item": "Cab fare to temple", "amount": 400}, {"item": "Lunch at Babai Hotel", "amount": 350}]) that sums to that day's estimated_cost.
-    
-    MULTI-CITY ITINERARY & TRANSIT ROUTING:
-    If multiple cities are being visited:
-    1. Logically sequence all visited cities across the {trip_length} days without unnecessary backtracking.
-    2. Allocate a sensible number of days per city given the overall trip duration of {trip_length} days.
-    3. On transition days between cities, include inter-city transit (train, bus, or cab/flight details and fares) as part of that transition day's morning/afternoon plan and cost breakdown.
-    4. For EACH day in `days`, set the `city` field on `ItineraryDay` to the specific city visited on that day (e.g. Day 1 city: "Goa", Day 2 city: "Goa", Day 3 city: "Gokarna", Day 4 city: "Gokarna").
-    5. Set `destination_city` to the FIRST city visited, and `cities_visited` to the full list of visited cities (e.g. ["Goa", "Gokarna"]).
-    
-    SAFETY EMERGENCY INFO, PHRASEBOOK, EVENTS, ETIQUETTE & DAY TRIPS:
-    1. Include `emergency_info` as passed from local expert research (`national_emergency_number`, `nearest_hospital`, `nearest_police_station`, `grounded`).
-    2. Include `local_events` and `events_grounded` as passed from local expert research.
-    3. Include `nearby_day_trips` as passed from local expert research.
-    4. Provide `local_phrasebook`: Include 8-10 essential, practical travel phrases (e.g. "Hello", "Thank you", "How much does this cost?", "Where is the bathroom?", "I need help", "Water please", "Delicious food") in the destination region's actual primary spoken language.
-       CRITICAL SCRIPT PURITY RULE: Write `phrase_local` ONLY in the single native script of the target regional language (e.g. Malayalam script for Kochi, Kannada script for Mysuru). Do NOT include Telugu/Hindi or any other language's script, and do NOT include parenthetical translations or script labels.
-    5. Provide `local_etiquette`: Include 5-6 region-specific cultural etiquette & customs advice items (`category`, `advice`) covering temple dress code (e.g., dhoti/mundu requirements for Kerala temples, modest head/shoulder coverings for Rajasthan temples), footwear removal rules, tipping norms, photography restrictions, and local greeting customs. MUST be specific to the destination state/region!
-    
-    GROUP TRIP SIZE & TRAVELERS:
-    This trip is planned for {travelers} traveler(s).
-    Set `travelers` in the output model to {travelers}.
-    Take group size into account: for groups of 2+ travelers, suggest suitable shared accommodation (e.g., family room, 2-bedroom homestay, or shared dorm/suite) rather than individual single rooms.
-
-    WEATHER FORECAST & WEATHER-AWARE PLANNING:
-    Real destination weather forecast data:
-    {weather_forecast}
-    - Read the weather forecast for each day.
-    - If rain probability is high (>50%) on a given day, prefer indoor/covered activities (museums, indoor markets, covered temples, cafes) and explicitly note it in `weather_note` for that day (e.g., "Rain likely (70%) - indoor museum and cafe plan recommended").
-    - If rain probability is low or clear/sunny, outdoor activities (forts, parks, outdoor walking tours) are great and note it in `weather_note` (e.g., "Clear skies (10% rain) - ideal for outdoor fort exploration").
-    - If weather data is unavailable, populate `weather_note` with "Weather data unavailable - standard seasonal precautions apply".
-
-    STRICT BUDGET CONTROLS & ITEMIZATION RULES:
-    The traveler's overall budget is {budget} in currency {currency} for {trip_length} days for the group of {travelers} traveler(s).
-    Estimate per-day costs (estimated_cost) and total trip cost (total_estimated_cost) strictly inside or near the stated budget of {budget}.
-    If the budget is low (e.g. under 5000 INR for multi-day trips), scale daily activities to budget stays/dorms, street food, and free/low-cost sights so that total_estimated_cost does NOT wildly exceed {budget}.
-    Ensure the total_estimated_cost is exactly equal to the arithmetic sum of the individual estimated_cost values across all days.
-
-    NO MISCELLANEOUS OR PADDING FILLER:
-    - Every item in `cost_breakdown` MUST be a real, specific named expenditure (e.g., "Entry ticket to Undavalli Caves", "Auto fare from Station to Kanaka Durga Temple", "Lunch: Gongura Mutton at Babai Hotel", "Evening snack: Mirchi Bajji").
-    - ABSOLUTELY FORBID generic catch-all filler or padding line items such as "Miscellaneous", "Misc", "Other expenses", "Buffer", "Shopping & extra", or "Unforeseen costs".
-    - Every single rupee in the daily cost breakdown must be accounted for by explicit, realistic, named activities, meals, transit, or accommodation.
-
-    ACCOMMODATION & BUDGET UPGRADE INSIGHTS:
-    1. Provide `recommended_stay`: Select a specific real hotel, hostel, homestay, or resort in the destination city that fits the stated budget tier and accommodates {travelers} traveler(s).
-    2. Provide `budget_upgrade_insights`: Suggest what extra hotel quality, dining experiences, or additional famous attractions/activities the tourist could unlock if they increased their total budget by 2000 to 3000 in stated currency ({currency}). Give enthusiastic, specific recommendations!
-
-    LANGUAGE & PLACE NAME INSTRUCTIONS:
-    The requested target output language is: "{language}".
-    - If "{language}" is "te" (Telugu), write all free-text user-facing descriptions (day theme, morning, afternoon, evening, packing_suggestions, local_transport_advice, why_recommended, summary_tip) in natural Telugu script (తెలుగు).
-    - If "{language}" is "hi" (Hindi), write all free-text user-facing descriptions in natural Hindi/Devanagari script (हिंदी).
-    - If "{language}" is "en" or unspecified, write in standard English.
-    - CRITICAL PLACE NAME RULE: Keep all specific place names, restaurant names, hotel names, street names, and landmark names (e.g., "Kanaka Durga Temple", "Babai Hotel", "Besant Road", "Prakasam Barrage") in English/Roman script across all output languages so they remain clear, searchable, and useful for navigation on maps.
+    Build a day-by-day itinerary for the {trip_length}-day trip. Each day needs a theme, morning/afternoon/evening plan (<80 words per slot).
+    Specify real iconic spots by name. For EACH day, provide itemized line-item `cost_breakdown` summing to `estimated_cost`. No generic catch-all filler line items.
+    The total_estimated_cost MUST NOT exceed {budget} {currency} for {travelers} traveler(s). This is a hard ceiling constraint, not a suggestion, regardless of how large or small the budget is. Budget allocation guideline: ~40% stay, ~35% activities/food, ~25% transit/contingency. Total estimated cost must equal sum of daily costs.
+    Provide `recommended_stay` and `budget_upgrade_insights` (+2000 to 3000).
+    Output language: "{language}". Keep place/restaurant/hotel names in English script.
   expected_output: >-
-    A complete itinerary covering every day of the trip in the requested output language ({language}), with currency, total
-    estimated cost matching the sum of daily estimated costs, daily breakdowns with itemized cost_breakdown lists,
-    weather_note for each day reflecting weather conditions, travelers count matching input, cost_per_person,
-    recommended stay tailored to group size and budget, budget upgrade insights (+2000 to 3000), transit advice, and a packing list.
+    Complete itinerary covering every day in language ({language}), with currency, total estimated cost, daily breakdowns with cost_breakdown, weather_note, travelers count, cost_per_person, recommended stay, budget upgrade insights, transit advice, and packing list.
   agent: travel_concierge
   context:
     - select_city_task
@@ -109,56 +37,18 @@ plan_itinerary_task:
 
 revise_itinerary_task:
   description: >-
-    You are given an EXISTING complete trip itinerary in JSON format:
-    {itinerary}
-
-    The traveler has provided the following conversational revision feedback:
-    "{feedback}"
-
-    Intelligently revise the itinerary based strictly on the user's feedback:
-    1. If the traveler asks for food, biryani, restaurants, cafes, shopping malls, cinemas, or specific attractions, ALWAYS identify and insert real, famous, iconic local spots by exact name (e.g. renowned local restaurants and specific signature dishes, popular shopping malls, trending cafes, and entertainment hubs in that city) into the daily morning/afternoon/evening itinerary. Use web search if needed.
-    2. Apply the modifications directly requested or necessary based on the feedback.
-    3. Preserve all other existing days, themes, activities, attractions, and costs that were NOT affected by the feedback.
-    4. If any day's activities or costs change, re-estimate that day's cost (estimated_cost) and ensure total_estimated_cost is updated to exactly equal the sum of all day costs.
-    5. Keep the packing suggestions, destination, currency, and transit advice intact or adjust them if specifically affected by the feedback.
-
-    LANGUAGE & PLACE NAME INSTRUCTIONS:
-    The requested target output language is: "{language}".
-    - If "{language}" is "te" (Telugu), write all free-text descriptions in natural Telugu script (తెలుగు).
-    - If "{language}" is "hi" (Hindi), write all free-text descriptions in natural Hindi script (हिंदी).
-    - If "{language}" is "en" or unspecified, write in standard English.
-    - CRITICAL PLACE NAME RULE: Keep all specific place names, restaurant names, landmark names, and street names in English/Roman script.
+    Revise the existing trip itinerary according to the traveler's feedback: "{feedback}".
+    Maintain day-by-day structure, currency, cost breakdowns, and language ({language}).
+    Update total_estimated_cost and cost_per_person if modified.
   expected_output: >-
-    A complete revised TripItinerary model reflecting the user's requested changes in the target language ({language}) with specific named places and restaurants while preserving the rest of the original itinerary.
+    Revised TripItinerary object reflecting the requested changes.
   agent: travel_concierge
 
 answer_destination_question_task:
   description: >-
-    The traveler is visiting {destination_city} and has asked the following specific question:
-    "{question}"
-
-    Prior Conversation History in this session:
-    {conversation_history}
-
-    Instructions:
-    1. Multi-Turn Context: Use the prior conversation history naturally to resolve references or follow-up queries (e.g. if the user previously asked about biryani and now asks "what about something cheaper" or "what about vegetarian options near there", recognize what they are referring to).
-    2. Decompose Compound Questions: If the question has multiple parts or topics (e.g. asking about food/biryani AND shopping malls/cinemas), decompose the question and search for EACH part separately using web search before answering.
-    3. No Redundant Searches: Once you find 1-2 reliable places for a sub-topic, immediately search for the remaining parts of the question.
-    4. Strict Local Grounding: Ground all recommendations strictly in real, named establishments located in {destination_city}.
-    5. Self-Report Grounding: After formulating the answer, explicitly categorize your statements:
-       - grounded_claims: List specific named places, establishments, or facts directly verified by tool search results.
-       - ungrounded_claims: List any general advice, assertions, or statements not backed by a specific search result. If everything in the answer is verified by search results, return an empty list ([]).
-    6. Provide a direct, helpful, and concise answer (3-6 sentences).
-
-    LANGUAGE & PLACE NAME INSTRUCTIONS:
-    The requested target output language is: "{language}".
-    - If "{language}" is "te" (Telugu), write the answer text in natural Telugu script (తెలుగు).
-    - If "{language}" is "hi" (Hindi), write the answer text in natural Hindi script (हिंदी).
-    - If "{language}" is "en" or unspecified, write in standard English.
-    - CRITICAL PLACE NAME RULE: Keep all specific establishment names, restaurant names, and landmark names in English/Roman script.
+    Answer user question about {destination_city}: "{question}".
+    Context/History: {conversation_history}.
+    Provide accurate, grounded recommendations.
   expected_output: >-
-    A structured QAResponse JSON containing:
-    - answer: direct 3-6 sentence response in the target language ({language}) naming specific real-world places in {destination_city}.
-    - grounded_claims: list of specific named places/facts directly verified by tool search results.
-    - ungrounded_claims: list of statements based on general knowledge without search result backing (empty list if all grounded).
+    QAResponse with answer, grounded_claims, ungrounded_claims, and sources.
   agent: local_qa_expert

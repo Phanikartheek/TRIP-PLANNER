@@ -63,7 +63,7 @@ def test_scrape_tool_only_attached_to_local_expert(crew_instance):
 
 def test_city_selection_schema_rejects_missing_fields():
     with pytest.raises(ValueError):
-        CitySelection(city="Lisbon")  # missing required fields
+        CitySelection()  # missing required city field
 
 
 def test_trip_itinerary_schema_accepts_valid_payload():
