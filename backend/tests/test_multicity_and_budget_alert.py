@@ -183,3 +183,192 @@ async def test_budget_alert_calculation(tmp_path: Path, monkeypatch: pytest.Monk
     res_lower = revised_job_lower.get("result")
     assert isinstance(res_lower, dict)
     assert res_lower.get("budget_alert") is None
+
+
+def test_reconcile_multi_city_itinerary_matches_themes_and_route():
+    """
+    4. Unit test: Multi-city reconciliation correctly matches each day to its city
+       based on day themes and activity text, avoiding misassignment (e.g. Day 4
+       with Vijayawada theme getting Vijayawada instead of Nellore), and constructs
+       the true chronological route.
+    """
+    from trip_planner.api.app import reconcile_multi_city_itinerary
+
+    itinerary_data = {
+        "destination_city": "TIRUPATI",
+        "cities_visited": ["TIRUPATI", "VIJAYAWADA", "NELLOR", "GUNTUR"],
+        "days": [
+            {
+                "day_number": 1,
+                "city": "TIRUPATI",
+                "theme": "Tirumala Temple Heritage & Spiritual Start",
+                "morning": "Arrive at Tirupati Railway Station...",
+            },
+            {
+                "day_number": 2,
+                "city": "TIRUPATI",  # LLM had incorrectly left this as TIRUPATI
+                "theme": "Nellore Coastal Beaches & Temple Exploration",
+                "morning": "Travel from Tirupati to Nellore by express train...",
+            },
+            {
+                "day_number": 3,
+                "city": "VIJAYAWADA",  # LLM had incorrectly put VIJAYAWADA
+                "theme": "Guntur Temples, Spice Markets & Historic Fort",
+                "morning": "Travel from Nellore to Guntur by express train...",
+            },
+            {
+                "day_number": 4,
+                "city": "NELLOR",  # LLM had incorrectly put NELLOR
+                "theme": "Vijayawada Heritage Temples, Caves & River Views",
+                "morning": "Travel from Guntur to Vijayawada by train...",
+            },
+            {
+                "day_number": 5,
+                "city": "GUNTUR",  # LLM had incorrectly put GUNTUR
+                "theme": "Krishna River Nature, Boat Ride & Departure",
+                "morning": "Visit scenic Krishna River delta in Vijayawada...",
+            },
+        ],
+    }
+
+    reconcile_multi_city_itinerary(
+        itinerary_data,
+        raw_cities=["TIRUPATI", "VIJAYAWADA", "NELLOR", "GUNTUR"],
+        origin_name="Hyderabad",
+    )
+
+    days = itinerary_data["days"]
+    assert days[0]["city"] == "TIRUPATI"
+    assert days[1]["city"] == "NELLOR"
+    assert days[2]["city"] == "GUNTUR"
+    assert days[3]["city"] == "VIJAYAWADA"
+    assert days[4]["city"] == "VIJAYAWADA"
+
+    # Chronological route sequence
+    assert itinerary_data["cities_visited"] == ["TIRUPATI", "NELLOR", "GUNTUR", "VIJAYAWADA"]
+    assert itinerary_data["destination_city"] == "TIRUPATI"
+    assert "Hyderabad ➔ TIRUPATI ➔ NELLOR ➔ GUNTUR ➔ VIJAYAWADA" in itinerary_data["intercity_transport"]["recommended_option"]
+
+
+def test_budget_string_parsing_triggers_warning_on_overrun():
+    """
+    Verifies that formatted currency strings (e.g. '₹3,000 INR') properly parse with clean_float
+    and correctly trigger budget_exceeded_warning when cost exceeds requested budget by >5%.
+    """
+    from trip_planner.schemas.models import clean_float
+
+    raw_budget_str = "₹3,000 INR"
+    target_budget = clean_float(raw_budget_str, 0.0)
+    assert target_budget == 3000.0
+
+    tot_cost = 3200.0
+    out_dict = {"total_estimated_cost": tot_cost, "currency": "INR"}
+
+    if target_budget > 0 and tot_cost > (target_budget * 1.05):
+        overrun = tot_cost - target_budget
+        pct = (overrun / target_budget) * 100.0
+        warning_msg = (
+            f"⚠️ Budget Alert: This itinerary's estimated cost (₹{tot_cost:,.0f}) "
+            f"exceeds your requested budget (₹{target_budget:,.0f}) by ₹{overrun:,.0f} ({pct:.1f}%)."
+        )
+        out_dict["budget_exceeded_warning"] = warning_msg
+    else:
+        out_dict["budget_exceeded_warning"] = None
+
+    assert out_dict["budget_exceeded_warning"] is not None
+    assert "₹3,200" in out_dict["budget_exceeded_warning"]
+    assert "₹3,000" in out_dict["budget_exceeded_warning"]
+    assert "₹200" in out_dict["budget_exceeded_warning"]
+    assert "6.7%" in out_dict["budget_exceeded_warning"]
+
+
+def test_landmark_grounding_resolves_vijayawada_and_nellore():
+    """
+    Verifies that landmark-to-city grounding accurately maps Undavalli Caves to Vijayawada
+    and Mypadu Beach to Nellore even if the city name is not in the theme text.
+    """
+    from trip_planner.api.app import reconcile_multi_city_itinerary
+
+    itinerary_data = {
+        "destination_city": "Nellore",
+        "cities_visited": ["Nellore", "Vijayawada"],
+        "days": [
+            {
+                "day_number": 1,
+                "city": "Nellore",  # Incorrect initial LLM tag
+                "theme": "Ancient Caves & River Island Exploration",
+                "morning": "Explore the multi-tiered Undavalli Caves with intricate rock-cut shrines.",
+                "afternoon": "Visit Kanaka Durga Temple and enjoy scenic boat ride to Bhavani Island.",
+                "evening": "Stroll across the historic Prakasam Barrage.",
+                "night": "Rest at nearby riverfront hotel.",
+            },
+            {
+                "day_number": 2,
+                "city": "Vijayawada",  # Incorrect initial LLM tag
+                "theme": "Coastal Breeze & Temple Architecture",
+                "morning": "Travel south towards the Penna river basin.",
+                "afternoon": "Relax on the golden sands of Mypadu Beach and enjoy fresh local seafood.",
+                "evening": "Visit the sacred Sri Ranganathaswamy Temple on the river banks.",
+                "night": "Overnight stay in coastal district.",
+            },
+        ],
+    }
+
+    reconcile_multi_city_itinerary(
+        itinerary_data,
+        raw_cities=["Nellore", "Vijayawada"],
+        origin_name="Hyderabad",
+    )
+
+    days = itinerary_data["days"]
+    assert days[0]["city"] == "Vijayawada"
+    assert days[1]["city"] == "Nellore"
+
+
+def test_calendar_ics_export_endpoint():
+    """
+    Verifies that GET /api/trip/{job_id}/calendar.ics generates valid RFC 5545 iCalendar content.
+    """
+    import uuid
+
+    test_job_id = f"test-ics-{uuid.uuid4().hex[:8]}"
+    db.create_job(
+        job_id=test_job_id,
+        job_type="plan",
+        status="complete",
+    )
+    mock_result = {
+        "destination_city": "Vijayawada",
+        "travel_date": "2026-11-15",
+        "trip_length_days": 2,
+        "days": [
+            {
+                "day_number": 1,
+                "city": "Vijayawada",
+                "theme": "Heritage Exploration",
+                "morning": "Visit Kanaka Durga Temple",
+                "afternoon": "Explore Undavalli Caves",
+                "evening": "Prakasam Barrage sunset",
+            },
+            {
+                "day_number": 2,
+                "city": "Vijayawada",
+                "theme": "River Island Fun",
+                "morning": "Boating to Bhavani Island",
+                "afternoon": "Bapu Museum tour",
+                "evening": "Shopping & departure",
+            },
+        ],
+    }
+    db.update_job(test_job_id, status="complete", result=mock_result)
+
+    response = client.get(f"/api/trip/{test_job_id}/calendar.ics")
+    assert response.status_code == 200
+    assert "text/calendar" in response.headers["Content-Type"]
+    assert "BEGIN:VCALENDAR" in response.text
+    assert "END:VCALENDAR" in response.text
+    assert "BEGIN:VEVENT" in response.text
+    assert "Kanaka Durga Temple" in response.text
+    assert "Bhavani Island" in response.text
+
+

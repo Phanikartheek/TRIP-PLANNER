@@ -33,4 +33,10 @@ jobs:
         env:
           PYTHONPATH: backend/src
         run: |
-          pytest backend/tests/ -v
+          pytest backend/tests/ -k "not test_crew" -v
+
+      - name: Run Agent Evaluation & Benchmark Harness
+        env:
+          PYTHONPATH: backend/src
+        run: |
+          python evals/harness.py

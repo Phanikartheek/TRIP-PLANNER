@@ -154,18 +154,50 @@ class PhrasebookEntry(BaseModel):
 
 class LocalEvent(BaseModel):
     name: str = Field(..., description="Name of the festival or event")
-    date_or_period: str = Field(..., description="Date, month, or season when it takes place")
-    description: str = Field(..., description="Short summary of what happens and why it's celebrated")
+    date_or_period: str = Field(default="Annual festival", description="Date, month, or season when it takes place")
+    description: str = Field(default="Celebrated with local traditional festivities and rituals.", description="Short summary of what happens and why it's celebrated")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_event_fields(cls, data: object) -> object:
+        if isinstance(data, dict):
+            if "date_or_period" not in data:
+                for k in ("date", "period", "month", "season", "time"):
+                    if k in data:
+                        data["date_or_period"] = str(data[k])
+                        break
+            if "description" not in data:
+                for k in ("details", "summary", "about", "why_celebrated"):
+                    if k in data:
+                        data["description"] = str(data[k])
+                        break
+        return data
 
 
 class EtiquetteItem(BaseModel):
     """Region-specific cultural etiquette and customs advice item."""
 
     category: str = Field(
-        ...,
+        default="General Cultural Norms",
         description="Etiquette area, e.g. 'Temple Dress Code', 'Footwear Rules', 'Tipping Norms', 'Photography Restrictions', 'Greeting Custom'",
     )
-    advice: str = Field(..., description="Specific cultural advice tailored to this region/state")
+    advice: str = Field(default="Respect local customs and traditions.", description="Specific cultural advice tailored to this region/state")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_etiquette_fields(cls, data: object) -> object:
+        if isinstance(data, dict):
+            if "advice" not in data:
+                for k in ("tip", "guideline", "rule", "description", "details"):
+                    if k in data:
+                        data["advice"] = str(data[k])
+                        break
+            if "category" not in data:
+                for k in ("type", "topic", "area", "name"):
+                    if k in data:
+                        data["category"] = str(data[k])
+                        break
+        return data
 
 
 class NearbyDayTrip(BaseModel):
@@ -173,9 +205,25 @@ class NearbyDayTrip(BaseModel):
 
     name: str = Field(..., description="Name of the day-trip destination")
     distance_from_destination: str = Field(
-        ..., description="Approximate travel distance or time, e.g. '35 km (1 hr drive)'"
+        default="1-2 hours travel", description="Approximate travel distance or time, e.g. '35 km (1 hr drive)'"
     )
-    why_visit: str = Field(..., description="Key attraction or reason to take this day trip")
+    why_visit: str = Field(default="Scenic and culturally significant excursion destination.", description="Key attraction or reason to take this day trip")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_daytrip_fields(cls, data: object) -> object:
+        if isinstance(data, dict):
+            if "why_visit" not in data:
+                for key in ("description", "reason", "why", "details", "attraction", "highlight"):
+                    if key in data:
+                        data["why_visit"] = str(data[key])
+                        break
+            if "distance_from_destination" not in data:
+                for key in ("distance", "travel_time", "duration", "time"):
+                    if key in data:
+                        data["distance_from_destination"] = str(data[key])
+                        break
+        return data
 
 
 CITY_REGIONAL_LANGUAGES = {

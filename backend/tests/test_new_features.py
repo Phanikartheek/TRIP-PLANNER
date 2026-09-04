@@ -146,3 +146,21 @@ def test_recommendations_endpoint_privacy_and_graceful_count(tmp_path: Path, mon
     assert "user_email" not in rec_item
     assert "qa_history" not in rec_item
     assert "packing_suggestions" not in rec_item
+
+
+def test_pwa_manifest_and_sw_endpoints():
+    """
+    4. Unit test: PWA endpoints - manifest.json and sw.js are served with correct media types.
+    """
+    manifest_resp = client.get("/manifest.json")
+    assert manifest_resp.status_code == 200
+    assert "application/manifest+json" in manifest_resp.headers.get("content-type", "")
+    manifest_data = manifest_resp.json()
+    assert "TripPlanner" in manifest_data.get("short_name", "")
+    assert manifest_data.get("display") == "standalone"
+
+    sw_resp = client.get("/sw.js")
+    assert sw_resp.status_code == 200
+    assert "application/javascript" in sw_resp.headers.get("content-type", "")
+    assert "trip-planner-v1" in sw_resp.text
+

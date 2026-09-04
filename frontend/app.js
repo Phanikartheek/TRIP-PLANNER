@@ -5,6 +5,61 @@
  */
 
 document.addEventListener('DOMContentLoaded', () => {
+  // --- Register Service Worker for 100% Offline Access ---
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').then((reg) => {
+        console.log('✅ Service Worker registered for offline access:', reg.scope);
+      }).catch((err) => {
+        console.warn('Service Worker registration failed:', err);
+      });
+    });
+  }
+
+  // PWA Install Prompt Listener
+  let deferredPrompt;
+  const btnInstallPwa = document.getElementById('btn-install-pwa');
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    if (btnInstallPwa) {
+      btnInstallPwa.style.display = 'inline-flex';
+      btnInstallPwa.onclick = () => {
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          deferredPrompt.userChoice.then((choiceResult) => {
+            if (choiceResult.outcome === 'accepted') {
+              btnInstallPwa.style.display = 'none';
+              showToast('📲 Trip Planner installed successfully on your device!');
+            }
+            deferredPrompt = null;
+          });
+        }
+      };
+    }
+  });
+
+  // Helper: WhatsApp Daily Digest Share
+  window.shareDayWhatsApp = function(dayNum) {
+    if (!currentItinerary || !currentItinerary.days) return;
+    const day = currentItinerary.days.find(d => d.day_number === dayNum) || currentItinerary.days[dayNum - 1];
+    if (!day) return;
+    const theme = day.theme || `Day ${dayNum}`;
+    const cName = day.city || currentItinerary.destination_city || 'City';
+    let text = `🌴 *Day ${dayNum}: ${theme}*\n`;
+    text += `📍 *Location:* ${cName}\n`;
+    if (day.date) text += `🗓️ *Date:* ${day.date}\n`;
+    if (day.weather_note) text += `🌦️ *Weather:* ${day.weather_note}\n\n`;
+    if (day.morning) text += `🌅 *Morning:* ${day.morning}\n\n`;
+    if (day.afternoon) text += `☀️ *Afternoon:* ${day.afternoon}\n\n`;
+    if (day.evening) text += `🌆 *Evening:* ${day.evening}\n\n`;
+    if (day.night) text += `🌙 *Night:* ${day.night}\n\n`;
+    text += `💰 *Est. Daily Cost:* ₹${day.estimated_cost || 0}\n`;
+    text += `🗺️ *Directions:* https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(theme + ' ' + cName)}`;
+
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
   // DOM Elements
   const form = document.getElementById('trip-form');
   const submitBtn = document.getElementById('submit-btn');
@@ -108,12 +163,25 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentJobId = null;
   let progressInterval = null;
 
-  // Currency Symbols & Configurations
+  // Currency Symbols & Live Tourist Exchange Rates (relative to INR)
   const CURRENCY_SYMBOLS = {
     INR: '₹',
     USD: '$',
     EUR: '€',
+    GBP: '£',
+    AED: 'AED ',
   };
+
+  const EXCHANGE_RATES = {
+    INR: 1.0,
+    USD: 0.012,
+    EUR: 0.011,
+    GBP: 0.0095,
+    AED: 0.044,
+  };
+
+  let activeDisplayCurrency = 'INR';
+
 
   // Domestic Indian Destination Presets
   const DOMESTIC_PRESETS = [
@@ -346,9 +414,14 @@ document.addEventListener('DOMContentLoaded', () => {
     budgetCurrencySymbol.textContent = sym;
   }
 
-  function formatMoney(amount, currencyCode = currentCurrency) {
+  function formatMoney(amount, currencyCode = activeDisplayCurrency) {
     const sym = CURRENCY_SYMBOLS[currencyCode] || currencyCode;
-    const num = Math.round(amount || 0);
+    let num = Number(amount) || 0;
+    if (currencyCode !== 'INR' && EXCHANGE_RATES[currencyCode]) {
+      num = Math.round(num * EXCHANGE_RATES[currencyCode]);
+    } else {
+      num = Math.round(num);
+    }
     return `${sym}${num.toLocaleString()}`;
   }
 
@@ -356,6 +429,84 @@ document.addEventListener('DOMContentLoaded', () => {
     const val = Number(budgetInput.value) || 0;
     budgetBadge.textContent = formatMoney(val, currentCurrency);
   }
+
+  // --- Live Tourist Currency Switcher on Results ---
+  const currencySelector = document.getElementById('currency-selector');
+  if (currencySelector) {
+    currencySelector.addEventListener('change', (e) => {
+      activeDisplayCurrency = e.target.value;
+      if (currentItinerary) {
+        totalCostBadge.textContent = formatMoney(currentItinerary.total_estimated_cost || 0, activeDisplayCurrency);
+        renderItinerary(currentItinerary, currentItinerary.total_estimated_cost, activeDisplayCurrency);
+        showToast(`💱 Switched display currency to ${activeDisplayCurrency}`);
+      }
+    });
+  }
+
+  // --- 🎫 Travel Pass Modal Handlers ---
+  const btnViewPass = document.getElementById('btn-view-pass');
+  const travelPassModal = document.getElementById('travel-pass-modal');
+  const passModalCloseBtn = document.getElementById('pass-modal-close-btn');
+  const btnPrintPass = document.getElementById('btn-print-pass');
+
+  if (btnViewPass) {
+    btnViewPass.addEventListener('click', () => {
+      if (!currentItinerary) {
+        showToast('⚠️ Please generate or load an itinerary first to view your Travel Pass.');
+        return;
+      }
+      const city = currentItinerary.destination_city || 'India';
+      const orig = (currentJobData && currentJobData.origin) || document.getElementById('origin').value || 'Departure Hub';
+      const startDate = currentItinerary.start_date || currentItinerary.travel_date || 'Day 1';
+      const endDate = currentItinerary.end_date || `${(currentItinerary.days || []).length} Days`;
+      const costPP = currentItinerary.cost_per_person || Math.round((currentItinerary.total_estimated_cost || 0) / Math.max(1, currentItinerary.travelers || 1));
+
+      const titleEl = document.getElementById('pass-dest-title');
+      const origEl = document.getElementById('pass-origin-city');
+      const destEl = document.getElementById('pass-dest-city');
+      const datesEl = document.getElementById('pass-dates');
+      const costEl = document.getElementById('pass-cost-pp');
+      const sightsContainer = document.getElementById('pass-sights-tags');
+
+      if (titleEl) titleEl.textContent = `${city.toUpperCase()} EXPEDITION PASS`;
+      if (origEl) origEl.textContent = orig;
+      if (destEl) destEl.textContent = city;
+      if (datesEl) datesEl.textContent = `${startDate} • ${endDate}`;
+      if (costEl) costEl.textContent = formatMoney(costPP, activeDisplayCurrency);
+
+      if (sightsContainer) {
+        sightsContainer.innerHTML = '';
+        const sights = [];
+        (currentItinerary.days || []).forEach(d => {
+          (d.activities || []).forEach(a => {
+            if (a.title && sights.length < 5) sights.push(a.title);
+          });
+        });
+        if (sights.length === 0) sights.push('Sightseeing & Cultural Exploration');
+        sights.forEach(s => {
+          const span = document.createElement('span');
+          span.style.cssText = 'background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 4px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; border: 1px solid rgba(56, 189, 248, 0.3);';
+          span.textContent = `📍 ${s}`;
+          sightsContainer.appendChild(span);
+        });
+      }
+
+      if (travelPassModal) travelPassModal.classList.remove('hidden');
+    });
+  }
+
+  if (passModalCloseBtn && travelPassModal) {
+    passModalCloseBtn.addEventListener('click', () => {
+      travelPassModal.classList.add('hidden');
+    });
+  }
+
+  if (btnPrintPass) {
+    btnPrintPass.addEventListener('click', () => {
+      window.print();
+    });
+  }
+
 
   // --- Quick Chips Handlers ---
   quickChips.forEach(chip => {
@@ -486,6 +637,62 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderGroupExpenses() {
     if (!splitTableBody) return;
+
+    let totalSpent = 0;
+    const paidByMap = {};
+
+    groupExpenses.forEach((exp, idx) => {
+      totalSpent += exp.amount;
+      paidByMap[exp.paidBy] = (paidByMap[exp.paidBy] || 0) + exp.amount;
+    });
+
+    // Update Live Wallet Progress Bar
+    const plannedBudget = (currentItinerary && currentItinerary.total_estimated_cost) ? currentItinerary.total_estimated_cost : (parseFloat(budgetInput.value) || 0);
+    const plannedEl = document.getElementById('wallet-planned-cost');
+    const spentEl = document.getElementById('wallet-total-spent');
+    const remainingEl = document.getElementById('wallet-remaining-balance');
+    const progressBar = document.getElementById('wallet-progress-bar');
+    const burnStatus = document.getElementById('wallet-burn-status');
+
+    if (plannedEl) plannedEl.textContent = `₹${plannedBudget.toLocaleString('en-IN')}`;
+    if (spentEl) spentEl.textContent = `₹${totalSpent.toLocaleString('en-IN')}`;
+    const rem = plannedBudget - totalSpent;
+    if (remainingEl) {
+      remainingEl.textContent = `₹${rem.toLocaleString('en-IN')}`;
+      remainingEl.style.color = rem >= 0 ? '#a7f3d0' : '#f87171';
+    }
+
+    if (progressBar) {
+      const pct = plannedBudget > 0 ? Math.min(100, Math.round((totalSpent / plannedBudget) * 100)) : 0;
+      progressBar.style.width = `${pct}%`;
+      if (rem < 0) {
+        progressBar.style.backgroundColor = '#ef4444';
+      } else if (pct > 85) {
+        progressBar.style.backgroundColor = '#f59e0b';
+      } else {
+        progressBar.style.backgroundColor = '#10b981';
+      }
+    }
+
+    if (burnStatus) {
+      if (plannedBudget <= 0) {
+        burnStatus.textContent = 'Track your actual spend on the trip to stay strictly within your budget!';
+        burnStatus.style.color = '#94a3b8';
+      } else if (rem < 0) {
+        burnStatus.innerHTML = `⚠️ <strong style="color:#ef4444;">Budget Exceeded!</strong> You have spent ₹${Math.abs(rem).toLocaleString('en-IN')} more than planned.`;
+      } else {
+        const pctLeft = Math.round((rem / plannedBudget) * 100);
+        burnStatus.innerHTML = `🟢 <strong>On Track:</strong> You still have <strong style="color:#4ade80;">₹${rem.toLocaleString('en-IN')} (${pctLeft}%)</strong> remaining.`;
+      }
+    }
+
+    // Persist to localStorage
+    if (currentJobId) {
+      try {
+        localStorage.setItem(`trip_wallet_${currentJobId}`, JSON.stringify(groupExpenses));
+      } catch (e) {}
+    }
+
     if (groupExpenses.length === 0) {
       splitTableBody.innerHTML = `
         <tr>
@@ -497,13 +704,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     splitTableBody.innerHTML = '';
-    let totalSpent = 0;
-    const paidByMap = {};
-
     groupExpenses.forEach((exp, idx) => {
-      totalSpent += exp.amount;
-      paidByMap[exp.paidBy] = (paidByMap[exp.paidBy] || 0) + exp.amount;
-
       const tr = document.createElement('tr');
       tr.style.borderBottom = '1px solid rgba(255,255,255,0.06)';
       tr.innerHTML = `
@@ -627,17 +828,27 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!jobId) {
         throw new Error('No job ID returned by server.');
       }
+      try { localStorage.setItem('trip_planner_last_job_id', jobId); } catch (e) {}
 
       // Poll ${API_BASE}/api/status/{job_id} every 3 seconds until completed or failed
       let jobStatus = initData.status || 'pending';
       let itineraryData = null;
-      const maxPollAttempts = 100; // Hard circuit breaker: 100 * 3s = 300s (5 minutes)
+      const maxPollAttempts = 300; // Hard circuit breaker: 300 * 3s = 900s (15 minutes, matching backend)
       let pollAttempts = 0;
 
       while (jobStatus === 'pending' || jobStatus === 'running') {
         pollAttempts++;
         if (pollAttempts > maxPollAttempts) {
-          throw new Error('⏱️ Request timed out after 5 minutes. The server took longer than expected. Please try again.');
+          throw new Error('⏱️ Request timed out after 15 minutes. The server took longer than expected. Please try again.');
+        }
+
+        const elapsedSec = pollAttempts * 3;
+        const elapsedMin = Math.floor(elapsedSec / 60);
+        const remSec = elapsedSec % 60;
+        const timeStr = elapsedMin > 0 ? `${elapsedMin}m ${remSec}s` : `${remSec}s`;
+        const btnSpan = submitBtn.querySelector('span');
+        if (btnSpan) {
+          btnSpan.textContent = `Agents Collaborating & Researching... (${timeStr})`;
         }
 
         await new Promise(resolve => setTimeout(resolve, 3000));
@@ -981,6 +1192,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const activeCurrency = itinerary.currency || currencyCode || currentCurrency;
     const transportAdvice = itinerary.local_transport_advice || [];
 
+    // Load persisted wallet expenses for this job
+    if (currentJobId) {
+      try {
+        const saved = localStorage.getItem(`trip_wallet_${currentJobId}`);
+        groupExpenses = saved ? JSON.parse(saved) : [];
+      } catch (e) {
+        groupExpenses = [];
+      }
+    } else {
+      groupExpenses = [];
+    }
+    renderGroupExpenses();
+
     if (itinerary.cities_visited && itinerary.cities_visited.length > 1) {
       destCity.textContent = `${city} (Route: ${itinerary.cities_visited.join(' ➔ ')})`;
     } else {
@@ -1046,10 +1270,20 @@ document.addEventListener('DOMContentLoaded', () => {
         'vijayawada': [16.5062, 80.6480],
         'nellore': [14.4426, 79.9865],
         'nellor': [14.4426, 79.9865],
+        'guntur': [16.3067, 80.4365],
+        'visakhapatnam': [17.6868, 83.2185],
+        'vizag': [17.6868, 83.2185],
         'goa': [15.2993, 74.1240],
+        'north goa': [15.5494, 73.7535],
+        'south goa': [15.1500, 73.9800],
+        'old goa': [15.5033, 73.9114],
+        'panjim': [15.4909, 73.8278],
         'gokarna': [14.5479, 74.3188],
         'mumbai': [19.0760, 72.8777],
         'bengaluru': [12.9716, 77.5946],
+        'bangalore': [12.9716, 77.5946],
+        'mysuru': [12.2958, 76.6394],
+        'mysore': [12.2958, 76.6394],
         'hyderabad': [17.3850, 78.4867],
         'chennai': [13.0827, 80.2707],
         'delhi': [28.6139, 77.2090],
@@ -1064,8 +1298,18 @@ document.addEventListener('DOMContentLoaded', () => {
         'agra': [27.1767, 78.0081]
       };
 
+      const getCityCoords = (cStr) => {
+        if (!cStr) return [16.5062, 80.6480];
+        const lower = String(cStr).toLowerCase().trim();
+        if (cityCoords[lower]) return cityCoords[lower];
+        for (const [k, pt] of Object.entries(cityCoords)) {
+          if (lower.includes(k) || k.includes(lower)) return pt;
+        }
+        return [16.5062, 80.6480];
+      };
+
       let baseCity = (city || 'vijayawada').toLowerCase().trim();
-      let coords = cityCoords[baseCity] || [16.5062, 80.6480];
+      let coords = getCityCoords(baseCity);
 
       const map = L.map('map-container').setView(coords, 10);
       window.activeTripMap = map;
@@ -1079,8 +1323,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const citiesList = itinerary.cities_visited || [city];
       citiesList.forEach((cName, idx) => {
-        const cKey = cName.toLowerCase().trim();
-        const cPos = cityCoords[cKey] || [coords[0] + (idx * 0.15), coords[1] + (idx * 0.15)];
+        const cPos = getCityCoords(cName);
         routeLatLngs.push(cPos);
 
         L.marker(cPos).addTo(map)
@@ -1096,8 +1339,96 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setTimeout(renderMap, 300);
 
+    // Render Smart Geographic Route Corridor & Distance Breakdown
+    function renderRouteCorridor(routeAnalysis, originCity) {
+      const corridorCard = document.getElementById('route-corridor-card');
+      const flowContainer = document.getElementById('corridor-flow-container');
+      const badgeTotalDist = document.getElementById('badge-total-distance');
+      const badgeSavedDist = document.getElementById('badge-distance-saved');
+      const summaryText = document.getElementById('corridor-summary-text');
+      const subtitle = document.getElementById('corridor-subtitle');
+
+      if (!corridorCard || !flowContainer) return;
+
+      if (!routeAnalysis || !routeAnalysis.legs || routeAnalysis.legs.length === 0) {
+        corridorCard.style.display = 'none';
+        return;
+      }
+
+      corridorCard.style.display = 'block';
+      const startHub = routeAnalysis.start_hub || originCity || 'Departure Hub';
+      if (subtitle) {
+        subtitle.textContent = `Starts from ${escapeHtml(startHub)}, visiting nearest destinations first along the natural geographic corridor.`;
+      }
+
+      if (badgeTotalDist) {
+        badgeTotalDist.textContent = `📏 ${Math.round(routeAnalysis.total_distance_km || 0)} km Total Corridor`;
+      }
+      if (badgeSavedDist) {
+        const saved = Math.round(routeAnalysis.distance_saved_km || 0);
+        if (saved > 0) {
+          badgeSavedDist.textContent = `⚡ Saved ${saved} km & ~${routeAnalysis.time_saved_hours || 0} hrs Backtracking!`;
+          badgeSavedDist.style.display = 'inline-block';
+        } else {
+          badgeSavedDist.textContent = `⚡ 0 km Backtracking (Optimal Route)`;
+          badgeSavedDist.style.display = 'inline-block';
+        }
+      }
+
+      flowContainer.innerHTML = '';
+      const legs = routeAnalysis.legs || [];
+
+      legs.forEach((leg, idx) => {
+        const legRow = document.createElement('div');
+        legRow.style.cssText = 'background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;';
+
+        const isFirst = idx === 0;
+        const isLast = idx === legs.length - 1;
+        const badgeColor = isFirst ? '#10b981' : (isLast ? '#f59e0b' : '#38bdf8');
+        const badgeBg = isFirst ? 'rgba(16, 185, 129, 0.15)' : (isLast ? 'rgba(245, 158, 11, 0.15)' : 'rgba(56, 189, 248, 0.15)');
+
+        legRow.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 12px; min-width: 240px;">
+            <div style="background: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeColor}; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.85rem;">
+              ${idx + 1}
+            </div>
+            <div>
+              <div style="font-weight: 700; color: #f8fafc; font-size: 0.95rem;">
+                ${escapeHtml(leg.from_city)} ➔ <span style="color: ${badgeColor};">${escapeHtml(leg.to_city)}</span>
+              </div>
+              <div style="font-size: 0.78rem; color: #94a3b8; margin-top: 2px;">
+                ${escapeHtml(leg.recommended_option || 'Transit Train / Bus')}
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="text-align: right;">
+              <div style="font-weight: 800; color: #f8fafc; font-size: 0.92rem;">
+                ${escapeHtml(leg.travel_duration || (Math.round(leg.distance_km) + ' km'))}
+              </div>
+              <div style="font-size: 0.75rem; color: #94a3b8;">
+                ${Math.round(leg.distance_km || 0)} km • Est. ₹${Math.round(leg.estimated_cost_per_person || 150)}/person
+              </div>
+            </div>
+            <span style="font-size: 0.72rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeColor};">
+              ${escapeHtml(leg.proximity_badge || 'Corridor Leg')}
+            </span>
+          </div>
+        `;
+        flowContainer.appendChild(legRow);
+      });
+
+      if (summaryText) {
+        summaryText.textContent = routeAnalysis.corridor_summary || '';
+      }
+    }
+
+    renderRouteCorridor(itinerary.route_analysis, (currentJobData && currentJobData.origin) || originInput.value.trim());
+
     // Render Inter-City Transit Recommendation Card (Multi-Leg & Single-Leg Support)
     const intercityCard = document.getElementById('intercity-transit-card');
+
     if (intercityCard) {
       const it = itinerary.intercity_transport;
       const legs = (it && it.route_legs && Array.isArray(it.route_legs) && it.route_legs.length > 0) ? it.route_legs : null;
@@ -1133,6 +1464,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div style="font-size: 0.78rem; color: #38bdf8; margin-top: 6px; background: rgba(56,189,248,0.08); padding: 6px 8px; border-radius: 6px;">
                   🚏 <strong>Station Connection:</strong> ${escapeHtml(leg.local_connect_tips || 'Prepaid auto or cab to hotel.')}
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;">
+                  <a href="https://www.confirmtkt.com/rbooking-d/trains/from/${encodeURIComponent(leg.from_city)}/to/${encodeURIComponent(leg.to_city)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.74rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.12); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.3);">
+                    <span>🚆 Check Trains (ConfirmTkt) ↗</span>
+                  </a>
+                  <a href="https://www.redbus.in/bus-tickets/${encodeURIComponent(leg.from_city)}-to-${encodeURIComponent(leg.to_city)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.74rem; color: #f87171; text-decoration: none; background: rgba(239, 68, 68, 0.12); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(239, 68, 68, 0.3);">
+                    <span>🚌 Check Buses (RedBus) ↗</span>
+                  </a>
+                  <a href="https://www.google.com/travel/flights?q=flights%20from%20${encodeURIComponent(leg.from_city)}%20to%20${encodeURIComponent(leg.to_city)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.74rem; color: #a78bfa; text-decoration: none; background: rgba(168, 85, 247, 0.12); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(168, 85, 247, 0.3);">
+                    <span>✈️ Compare Flights ↗</span>
+                  </a>
                 </div>
               </div>
             `).join('')}
@@ -1276,6 +1618,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
+      let displayCity = day.city || '';
+      if (!displayCity && itinerary.cities_visited && Array.isArray(itinerary.cities_visited) && itinerary.cities_visited.length > 1) {
+        const themeLower = (theme || '').toLowerCase();
+        for (const c of itinerary.cities_visited) {
+          const cLower = String(c).toLowerCase().trim();
+          if (
+            themeLower.includes(cLower) ||
+            (cLower.startsWith('nellor') && themeLower.includes('nellor')) ||
+            (cLower.startsWith('tirupati') && (themeLower.includes('tirupati') || themeLower.includes('tirumala'))) ||
+            (cLower.startsWith('vijayawada') && (themeLower.includes('vijayawada') || themeLower.includes('bezawada'))) ||
+            (cLower.startsWith('guntur') && themeLower.includes('guntur'))
+          ) {
+            displayCity = c;
+            break;
+          }
+        }
+      }
+
       const dayCard = document.createElement('div');
       dayCard.className = `day-card ${idx === 0 ? 'open' : ''}`;
       dayCard.innerHTML = `
@@ -1284,7 +1644,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <span class="day-num-pill">Day ${dayNum}</span>
             ${day.date ? `<span class="day-date-pill" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 4px;">🗓️ ${escapeHtml(day.date)}</span>` : ''}
             <span class="day-theme-text" style="margin-left: 6px;">${escapeHtml(theme)}</span>
-            ${day.city ? `<span class="day-city-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 6px;">📍 ${escapeHtml(day.city)}</span>` : ''}
+            ${displayCity ? `<span class="day-city-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 6px;">📍 ${escapeHtml(displayCity)}</span>` : ''}
           </div>
           <div class="day-meta">
             ${costTagHtml}
@@ -1292,6 +1652,11 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
         <div class="day-body">
+          <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
+            <button type="button" class="btn-secondary" style="font-size: 0.78rem; padding: 4px 10px; background: rgba(37, 211, 102, 0.15); border: 1px solid rgba(37, 211, 102, 0.35); color: #4ade80; border-radius: 6px; cursor: pointer;" onclick="event.stopPropagation(); shareDayWhatsApp(${dayNum})">
+              <span>💬 Send Day ${dayNum} to WhatsApp</span>
+            </button>
+          </div>
           ${day.weather_note ? `
             <div class="weather-note-banner" style="background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 6px 12px; margin-bottom: 12px; font-size: 0.85rem; color: #60a5fa; display: flex; align-items: center; gap: 6px;">
               <span>🌦️</span> <strong>Weather Forecast Note:</strong> ${escapeHtml(day.weather_note)}
@@ -1300,16 +1665,31 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="activity-block">
               <div class="time-slot-label">🌅 Morning (Breakfast / Fresh Up / Sightseeing)</div>
               <div class="activity-desc">${escapeHtml(day.morning)}</div>
+              <div style="margin-top: 6px;">
+                <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.morning.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
+                  <span>🗺️ Directions in Google Maps ↗</span>
+                </a>
+              </div>
             </div>` : ''}
           ${day.afternoon ? `
             <div class="activity-block">
               <div class="time-slot-label">☀️ Afternoon (Regional Lunch & Sights)</div>
               <div class="activity-desc">${escapeHtml(day.afternoon)}</div>
+              <div style="margin-top: 6px;">
+                <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.afternoon.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
+                  <span>🗺️ Directions in Google Maps ↗</span>
+                </a>
+              </div>
             </div>` : ''}
           ${day.evening ? `
             <div class="activity-block">
               <div class="time-slot-label">🌆 Evening (Tea / Snacks & Markets)</div>
               <div class="activity-desc">${escapeHtml(day.evening)}</div>
+              <div style="margin-top: 6px;">
+                <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.evening.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
+                  <span>🗺️ Directions in Google Maps ↗</span>
+                </a>
+              </div>
             </div>` : ''}
           ${day.night ? `
             <div class="activity-block" style="border-left-color: #a855f7;">
@@ -1405,6 +1785,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (emPolName) emPolName.textContent = 'Central Police Station';
         if (emPolArea) emPolArea.textContent = `📍 ${city}`;
       }
+
+      // Wire Emergency Navigation Radar links
+      const hospNav = document.getElementById('emergency-hospital-nav');
+      const polNav = document.getElementById('emergency-police-nav');
+      const hospQuery = (em.nearest_hospital && em.nearest_hospital.name) ? `${em.nearest_hospital.name} ${em.nearest_hospital.area || city}` : `hospital near ${city}`;
+      const polQuery = (em.nearest_police_station && em.nearest_police_station.name) ? `${em.nearest_police_station.name} ${em.nearest_police_station.area || city}` : `police station near ${city}`;
+      if (hospNav) hospNav.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(hospQuery)}`;
+      if (polNav) polNav.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(polQuery)}`;
 
       if (em.grounded) {
         if (emBadge) { emBadge.style.display = 'inline-block'; emBadge.textContent = '✓ Verified Search Results'; }
@@ -1614,7 +2002,8 @@ document.addEventListener('DOMContentLoaded', () => {
                   </div>
                   <h4 style="font-size: 1.02rem; font-weight: 700; color: #f8fafc; margin: 6px 0 4px 0;">${escapeHtml(s.name)}</h4>
                   <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 6px;">${escapeHtml(s.address_or_area || 'Central Hub')}</div>
-                  <p style="font-size: 0.82rem; color: #cbd5e1; margin: 0; line-height: 1.4;">${escapeHtml(s.why_recommended || 'Comfortable budget accommodation.')}</p>
+                  <p style="font-size: 0.82rem; color: #cbd5e1; margin: 0 0 8px 0; line-height: 1.4;">${escapeHtml(s.why_recommended || 'Comfortable budget accommodation.')}</p>
+                  <a href="https://www.google.com/travel/hotels?q=${encodeURIComponent((s.name || 'Hotel') + ' ' + (s.city || city))}" target="_blank" rel="noopener noreferrer" style="display:inline-block; font-size:0.75rem; color:#38bdf8; text-decoration:none; background:rgba(56,189,248,0.1); padding:4px 10px; border-radius:6px; border:1px solid rgba(56,189,248,0.25);">🏨 Check Rates & Availability ↗</a>
                 </div>
               `).join('')}
             </div>
@@ -2049,6 +2438,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // --- Calendar .ics Export Handler ---
+  const btnDownloadCalendar = document.getElementById('btn-download-calendar');
+  if (btnDownloadCalendar) {
+    btnDownloadCalendar.addEventListener('click', () => {
+      if (!currentJobId) {
+        showToast('⚠️ No active trip itinerary found to export.');
+        return;
+      }
+      window.open(`/api/trip/${currentJobId}/calendar.ics`, '_blank');
+      showToast('📅 Exporting calendar schedule (.ics)...');
+    });
+  }
+
   // --- Auth & Magic Link Modal Handlers ---
   const authHeaderWidget = document.getElementById('auth-header-widget');
   const loginModal = document.getElementById('login-modal');
@@ -2184,7 +2586,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Handle URL Query Params (e.g. auth_error)
+  // Handle URL Query Params (e.g. auth_error, job_id)
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.has('auth_error')) {
     const err = urlParams.get('auth_error');
@@ -2194,6 +2596,36 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast('🔑 Please sign in to view your saved trips.');
     }
     window.history.replaceState({}, document.title, window.location.pathname);
+  }
+
+  // Auto-load trip if job_id passed in URL or recent job stored
+  let targetJobId = urlParams.get('job_id') || urlParams.get('id');
+  if (!targetJobId) {
+    try {
+      targetJobId = localStorage.getItem('trip_planner_last_job_id');
+    } catch (e) {}
+  }
+  if (targetJobId) {
+    (async () => {
+      try {
+        showToast('🔄 Loading your itinerary...');
+        const res = await fetch(`${API_BASE}/api/status/${targetJobId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === 'complete' && data.result) {
+            currentJobId = targetJobId;
+            currentItinerary = data.result;
+            finishAgentProgressAnimation();
+            renderItinerary(data.result, data.result.total_estimated_cost, data.result.currency || 'INR');
+            showToast('🎉 Loaded your AI trip itinerary!');
+          } else if (data.status === 'running' || data.status === 'pending') {
+            showToast('⏳ Trip generation in progress...');
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load initial job:', e);
+      }
+    })();
   }
 
   // Initial Presets & Auth Check Render

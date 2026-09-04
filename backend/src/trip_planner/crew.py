@@ -176,6 +176,15 @@ def _safe_litellm_completion(*args, **kwargs):
                         kwargs["messages"] = _shrink_messages_further(kwargs["messages"])
                 else:
                     tool_use_fail_count = 0  # reset on non-tool errors
+                    err_str = str(e)
+                    if "TPD" in err_str or "tokens per day" in err_str or "daily" in err_str:
+                        kwargs["model"] = "groq/qwen/qwen3.6-27b"
+                        print(f"[SAFE_LITELLM] TPD limit hit. Auto-fallback model switched to {kwargs.get('model')}", flush=True)
+                        time.sleep(1.0)
+                        try:
+                            return _original_litellm_completion(*args, **kwargs)
+                        except Exception as inner_e:
+                            print(f"[SAFE_LITELLM] Fallback model call failed: {inner_e}", flush=True)
                     wait_time = 12
                     print(f"[SAFE_LITELLM] Rate limit or parse failure ({err_msg[:60]}...). Backing off for {wait_time}s (Attempt {attempt+1}/{max_retries})...", flush=True)
                     if "messages" in kwargs and isinstance(kwargs["messages"], list):
@@ -225,15 +234,51 @@ class TripPlannerCrew:
     tasks_config = "config/tasks.yaml"
 
     def _get_llm(self) -> LLM:
-        groq_key = os.environ.get("GROQ_API_KEY", "")
-        if groq_key and len(groq_key) > 5:
-            model = os.environ.get("TRIP_PLANNER_MODEL", "groq/qwen/qwen3.6-27b")
-            return LLM(model=model, api_key=groq_key, temperature=0.2)
+        raw_model = os.environ.get("TRIP_PLANNER_MODEL", "").strip()
+        or_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+        groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+
+        # Hermes 3 aliases & resolution
+        if raw_model.lower() in ("hermes", "hermes3", "hermes-3", "hermes-3-70b"):
+            model = "openrouter/nousresearch/hermes-3-llama-3.1-70b"
+        elif raw_model.lower() in ("hermes-3-405b", "hermes-405b"):
+            model = "openrouter/nousresearch/hermes-3-llama-3.1-405b"
+        elif raw_model:
+            model = raw_model
+        elif or_key and len(or_key) >= 10:
+            # Auto-default to Hermes 3 when OpenRouter key is configured
+            model = "openrouter/nousresearch/hermes-3-llama-3.1-70b"
         else:
-            raise ValueError(
-                "GROQ_API_KEY environment variable is not set. "
-                "Please set GROQ_API_KEY in your .env file or environment."
+            model = "groq/qwen/qwen3.6-27b"
+
+        if model.startswith("openrouter/"):
+            if not or_key or len(or_key) < 10:
+                # If Hermes 3 was requested but OpenRouter key is missing, fallback gracefully to Groq
+                if groq_key and len(groq_key) >= 5:
+                    import logging
+                    logging.getLogger("trip_planner.crew").warning(
+                        "OPENROUTER_API_KEY not found for Hermes 3 (%s). Falling back gracefully to Groq (qwen3.6-27b).",
+                        model
+                    )
+                    return LLM(model="groq/qwen/qwen3.6-27b", api_key=groq_key, temperature=0.2)
+                raise ValueError(
+                    "OPENROUTER_API_KEY is not set. "
+                    "Please set OPENROUTER_API_KEY in your .env file to use Hermes 3."
+                )
+            return LLM(
+                model=model,
+                api_key=or_key,
+                api_base="https://openrouter.ai/api/v1",
+                temperature=0.2,
             )
+        else:
+            if not groq_key or len(groq_key) < 5:
+                raise ValueError(
+                    "GROQ_API_KEY environment variable is not set. "
+                    "Please set GROQ_API_KEY in your .env file or environment."
+                )
+            return LLM(model=model, api_key=groq_key, temperature=0.2)
+
 
     @agent
     def city_selector(self) -> Agent:

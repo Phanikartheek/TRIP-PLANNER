@@ -1,21 +1,21 @@
 select_city_task:
   description: >-
-    Compare candidate cities: {cities}. Traveler is departing from {origin} for a {trip_length}-day trip with interests in {interests} and budget of {budget}.
-    Search web for weather/seasonal conditions and typical daily costs before deciding.
-    If multiple candidate cities are in {cities}, sequence them into an ordered route; set `city` to the FIRST city and `cities_visited` to the ordered list. Otherwise set `city` to that city and `cities_visited` to null.
+    Evaluate destinations from: {cities}. Traveler is departing from {origin} for a {trip_length}-day trip with interests in {interests} and budget of {budget}.
+    Search web for weather/seasonal conditions and typical daily costs.
+    CRITICAL MULTI-DESTINATION RULE: If {cities} contains multiple cities (e.g., comma-separated like "Goa, Gokarna, Munnar"), the user explicitly wants to visit ALL of these destinations in this single trip. You MUST sequence ALL listed cities into a geographically sensible, ordered route. Set `city` to the FIRST city on the route and `cities_visited` to the complete ordered list of ALL requested cities. Do NOT drop or filter out any of the user's requested cities. Only set `cities_visited` to null if exactly one city was provided.
   expected_output: >-
-    A single recommended primary city with country, justification, best time to visit, currency code, estimated daily budget, and cities_visited if multi-city.
+    Destination recommendation with country, justification, best time to visit, currency code, estimated daily budget, and `cities_visited` containing the complete ordered list of all requested cities.
   agent: city_selector
 
 gather_city_info_task:
   description: >-
-    Research chosen city/cities: top attractions matching {interests}, local food/restaurants, safety notes, and practical transit options.
+    Research the chosen destination(s) from select_city_task. If multiple cities are in `cities_visited`, you MUST research top attractions, local food gems, safety, and transit connections for EVERY city listed in `cities_visited`.
     Use web search to ground info:
     1. Emergency info: Populate `emergency_info` (`nearest_hospital`, `nearest_police_station`, `national_emergency_number`: "112", `grounded`: true).
     2. Local events & festivals: Populate `local_events` (name, date_or_period, description, `events_grounded`: true).
     3. Nearby day trips: Populate `nearby_day_trips` (name, distance_from_destination, why_visit).
   expected_output: >-
-    Structured city guide: top attractions, local food, safety, weather advice, transit tips, emergency_info, local_events, and nearby_day_trips.
+    Structured city guide covering all visited cities: top attractions, local food, safety, weather advice, transit tips, emergency_info, local_events, and nearby_day_trips.
   agent: local_expert
   context:
     - select_city_task
@@ -24,11 +24,13 @@ plan_itinerary_task:
   description: >-
     Build a day-by-day itinerary for the {trip_length}-day trip. Each day needs a theme, morning/afternoon/evening plan (<80 words per slot).
     Specify real iconic spots by name. For EACH day, provide itemized line-item `cost_breakdown` summing to `estimated_cost`. No generic catch-all filler line items.
+    CRITICAL MULTI-CITY ROUTE ALLOCATION: If multiple cities are in {cities} or `cities_visited`, you MUST create a multi-city itinerary that visits ALL requested cities across the {trip_length} days. Allocate days logically to each city (e.g., for 5 days across Goa, Gokarna, Munnar: Day 1-2 in Goa, Day 3 in Gokarna, Day 4-5 in Munnar). Set the `city` field on EVERY day object to the EXACT city being visited on that day — the `city` field MUST match the location described in that day's theme and activities (e.g. if the day visits Vijayawada, `city` MUST be "Vijayawada", NOT another city). GEOGRAPHIC CORRIDOR SEQUENCING: Sequence multi-city visits starting from {origin} in strict order of geographic proximity (nearest adjacent cities first, moving progressively outward to distant destinations). NEVER backtrack or zig-zag across regions (e.g. starting from Vijayawada, visit adjacent Guntur first before heading to Nellore and Tirupati). When transitioning between cities, include inter-city transit details in the plan. Every city in {cities} MUST be visited and appear in the schedule!
     The total_estimated_cost MUST NOT exceed {budget} {currency} for {travelers} traveler(s). This is a hard ceiling constraint, not a suggestion, regardless of how large or small the budget is. Budget allocation guideline: ~40% stay, ~35% activities/food, ~25% transit/contingency. Total estimated cost must equal sum of daily costs.
+
     Provide `recommended_stay` and `budget_upgrade_insights` (+2000 to 3000).
     Output language: "{language}". Keep place/restaurant/hotel names in English script.
   expected_output: >-
-    Complete itinerary covering every day in language ({language}), with currency, total estimated cost, daily breakdowns with cost_breakdown, weather_note, travelers count, cost_per_person, recommended stay, budget upgrade insights, transit advice, and packing list.
+    Complete itinerary covering every day in language ({language}), with currency, total estimated cost, daily breakdowns with cost_breakdown and the exact `city` visited for each day, weather_note, travelers count, cost_per_person, recommended stay, budget upgrade insights, transit advice, and packing list.
   agent: travel_concierge
   context:
     - select_city_task

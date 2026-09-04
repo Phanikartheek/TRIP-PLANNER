@@ -123,6 +123,19 @@
             <div id="share-emergency-police-area" style="font-size: 0.83rem; color: #94a3b8; margin-top: 2px;">--</div>
           </div>
         </div>
+
+        <!-- Live Emergency Near Me Radar Actions -->
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px;">
+          <a href="tel:112" style="background: #ef4444; color: #fff; padding: 8px 16px; border-radius: 8px; text-decoration: none; font-size: 0.85rem; font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
+            <span>📞</span> 1-Tap Emergency Call (112)
+          </a>
+          <a id="share-emergency-hospital-nav" href="https://www.google.com/maps/search/hospital+near+me/" target="_blank" rel="noopener noreferrer" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; padding: 8px 16px; border-radius: 8px; text-decoration: none; font-size: 0.85rem; font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
+            <span>🏥</span> Navigate to Nearest Hospital ↗
+          </a>
+          <a id="share-emergency-police-nav" href="https://www.google.com/maps/search/police+station+near+me/" target="_blank" rel="noopener noreferrer" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #7dd3fc; padding: 8px 16px; border-radius: 8px; text-decoration: none; font-size: 0.85rem; font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
+            <span>👮</span> Navigate to Police Station ↗
+          </a>
+        </div>
       </div>
 
       <!-- Local Phrasebook Card -->
@@ -189,6 +202,9 @@
         <button type="button" class="btn-secondary" id="btn-share-copy">
           <span>🔗 Copy Link</span>
         </button>
+        <button type="button" class="btn-secondary" id="btn-share-calendar">
+          <span>📅 Add to Calendar (.ics)</span>
+        </button>
         <button type="button" class="btn-secondary" id="btn-share-print">
           <span>🖨️ Print / Save PDF</span>
         </button>
@@ -235,6 +251,7 @@
       }
 
       function renderSharedItinerary(itinerary) {
+        window.currentShareItinerary = itinerary;
         loadingEl.classList.add('hidden');
         loadingEl.style.display = 'none';
         resultsCard.style.display = 'block';
@@ -326,6 +343,24 @@
             `;
           }
 
+          let displayCity = day.city || '';
+          if (!displayCity && itinerary.cities_visited && Array.isArray(itinerary.cities_visited) && itinerary.cities_visited.length > 1) {
+            const themeLower = (theme || '').toLowerCase();
+            for (const c of itinerary.cities_visited) {
+              const cLower = String(c).toLowerCase().trim();
+              if (
+                themeLower.includes(cLower) ||
+                (cLower.startsWith('nellor') && themeLower.includes('nellor')) ||
+                (cLower.startsWith('tirupati') && (themeLower.includes('tirupati') || themeLower.includes('tirumala'))) ||
+                (cLower.startsWith('vijayawada') && (themeLower.includes('vijayawada') || themeLower.includes('bezawada'))) ||
+                (cLower.startsWith('guntur') && themeLower.includes('guntur'))
+              ) {
+                displayCity = c;
+                break;
+              }
+            }
+          }
+
           const card = document.createElement('div');
           card.className = 'day-card';
           card.innerHTML = `
@@ -333,14 +368,19 @@
               <div class="day-title-group">
                 <span class="day-badge">Day ${dayNum}</span>
                 <h4 class="day-theme">${escapeHtml(theme)}</h4>
-                ${day.city ? `<span class="day-city-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 6px;">📍 ${escapeHtml(day.city)}</span>` : ''}
+                ${displayCity ? `<span class="day-city-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 6px;">📍 ${escapeHtml(displayCity)}</span>` : ''}
               </div>
               <div class="day-meta">${costBadgeHtml}</div>
             </div>
             <div class="day-body">
-              ${day.morning ? `<div class="time-block"><span class="time-tag morning">🌅 Morning</span><p class="activity-desc">${escapeHtml(day.morning)}</p></div>` : ''}
-              ${day.afternoon ? `<div class="time-block"><span class="time-tag afternoon">☀️ Afternoon</span><p class="activity-desc">${escapeHtml(day.afternoon)}</p></div>` : ''}
-              ${day.evening ? `<div class="time-block"><span class="time-tag evening">🌙 Evening</span><p class="activity-desc">${escapeHtml(day.evening)}</p></div>` : ''}
+              <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+                <button type="button" class="btn-secondary" style="font-size: 0.74rem; padding: 3px 8px; background: rgba(37, 211, 102, 0.15); border: 1px solid rgba(37, 211, 102, 0.35); color: #4ade80; border-radius: 6px; cursor: pointer;" onclick="event.stopPropagation(); shareDayWhatsAppShare(${idx + 1})">
+                  <span>💬 Send to WhatsApp</span>
+                </button>
+              </div>
+              ${day.morning ? `<div class="time-block"><span class="time-tag morning">🌅 Morning</span><p class="activity-desc">${escapeHtml(day.morning)}</p><a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.morning.slice(0, 80) + ' ' + (displayCity || itinerary.destination_city || ''))}" target="_blank" rel="noopener noreferrer" style="display:inline-flex; align-items:center; gap:4px; font-size:0.72rem; color:#38bdf8; text-decoration:none; margin-top:4px;">🗺️ Directions ↗</a></div>` : ''}
+              ${day.afternoon ? `<div class="time-block"><span class="time-tag afternoon">☀️ Afternoon</span><p class="activity-desc">${escapeHtml(day.afternoon)}</p><a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.afternoon.slice(0, 80) + ' ' + (displayCity || itinerary.destination_city || ''))}" target="_blank" rel="noopener noreferrer" style="display:inline-flex; align-items:center; gap:4px; font-size:0.72rem; color:#38bdf8; text-decoration:none; margin-top:4px;">🗺️ Directions ↗</a></div>` : ''}
+              ${day.evening ? `<div class="time-block"><span class="time-tag evening">🌙 Evening</span><p class="activity-desc">${escapeHtml(day.evening)}</p><a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.evening.slice(0, 80) + ' ' + (displayCity || itinerary.destination_city || ''))}" target="_blank" rel="noopener noreferrer" style="display:inline-flex; align-items:center; gap:4px; font-size:0.72rem; color:#38bdf8; text-decoration:none; margin-top:4px;">🗺️ Directions ↗</a></div>` : ''}
             </div>
           `;
           timelineEl.appendChild(card);
@@ -423,6 +463,15 @@
             if (emPolName) emPolName.textContent = 'Central Police Station';
             if (emPolArea) emPolArea.textContent = `📍 ${itinerary.destination_city || 'City'}`;
           }
+
+          // Wire Emergency Navigation Radar links
+          const hospNav = document.getElementById('share-emergency-hospital-nav');
+          const polNav = document.getElementById('share-emergency-police-nav');
+          const targetC = itinerary.destination_city || 'City';
+          const hospQuery = (em.nearest_hospital && em.nearest_hospital.name) ? `${em.nearest_hospital.name} ${em.nearest_hospital.area || targetC}` : `hospital near ${targetC}`;
+          const polQuery = (em.nearest_police_station && em.nearest_police_station.name) ? `${em.nearest_police_station.name} ${em.nearest_police_station.area || targetC}` : `police station near ${targetC}`;
+          if (hospNav) hospNav.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(hospQuery)}`;
+          if (polNav) polNav.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(polQuery)}`;
 
           if (em.grounded) {
             if (emBadge) { emBadge.style.display = 'inline-block'; emBadge.textContent = '✓ Verified Search Results'; }
@@ -530,6 +579,33 @@
         document.getElementById('btn-share-print').addEventListener('click', () => {
           window.print();
         });
+
+        const btnShareCal = document.getElementById('btn-share-calendar');
+        if (btnShareCal) {
+          btnShareCal.addEventListener('click', () => {
+            window.open(`/api/trip/${jobId}/calendar.ics`, '_blank');
+            showToast('📅 Exporting calendar schedule (.ics)...', 'success');
+          });
+        }
+
+        window.shareDayWhatsAppShare = function(dayNum) {
+          const it = window.currentShareItinerary;
+          if (!it || !it.days) return;
+          const day = it.days.find(d => d.day_number === dayNum) || it.days[dayNum - 1];
+          if (!day) return;
+          const theme = day.theme || `Day ${dayNum}`;
+          const cName = day.city || it.destination_city || 'City';
+          let text = `🌴 *Day ${dayNum}: ${theme}*\n`;
+          text += `📍 *Location:* ${cName}\n`;
+          if (day.date) text += `🗓️ *Date:* ${day.date}\n`;
+          if (day.morning) text += `🌅 *Morning:* ${day.morning}\n\n`;
+          if (day.afternoon) text += `☀️ *Afternoon:* ${day.afternoon}\n\n`;
+          if (day.evening) text += `🌆 *Evening:* ${day.evening}\n\n`;
+          text += `💰 *Est. Daily Cost:* ₹${day.estimated_cost || 0}\n`;
+          text += `🗺️ *Route:* https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(theme + ' ' + cName)}`;
+
+          window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+        };
       }
 
       function escapeHtml(str) {

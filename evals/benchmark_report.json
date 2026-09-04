@@ -1,0 +1,33 @@
+{
+  "harness_version": "1.0.0",
+  "total_cases": 2,
+  "passed_cases": 2,
+  "average_overall_score": 100.0,
+  "status": "PASSED",
+  "results": [
+    {
+      "test_case": "Benchmark 1: Budget Goa Vacation",
+      "metrics": {
+        "budget_compliance": 100.0,
+        "landmark_grounding": 100.0,
+        "temporal_completeness": 100.0,
+        "logistics_integrity": 100.0,
+        "overall_quality_score": 100.0,
+        "passed": true
+      },
+      "passed": true
+    },
+    {
+      "test_case": "Benchmark 2: Multi-City Andhra Grounding Check",
+      "metrics": {
+        "budget_compliance": 100.0,
+        "landmark_grounding": 100.0,
+        "temporal_completeness": 100.0,
+        "logistics_integrity": 100.0,
+        "overall_quality_score": 100.0,
+        "passed": true
+      },
+      "passed": true
+    }
+  ]
+}

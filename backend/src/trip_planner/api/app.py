@@ -187,6 +187,22 @@ async def serve_app_js():
     raise HTTPException(status_code=404, detail="app.js not found")
 
 
+@app.get("/manifest.json")
+async def serve_manifest():
+    manifest_file = FRONTEND_DIR / "manifest.json"
+    if manifest_file.exists():
+        return FileResponse(str(manifest_file), media_type="application/manifest+json")
+    raise HTTPException(status_code=404, detail="manifest.json not found")
+
+
+@app.get("/sw.js")
+async def serve_sw():
+    sw_file = FRONTEND_DIR / "sw.js"
+    if sw_file.exists():
+        return FileResponse(str(sw_file), media_type="application/javascript")
+    raise HTTPException(status_code=404, detail="sw.js not found")
+
+
 
 
 class LoginRequest(BaseModel):
@@ -211,6 +227,489 @@ class JobStatusResponse(BaseModel):
     travel_date: str | None = None
     reminder_sent: bool | None = None
     checklist: list[dict[str, Any]] | None = None
+
+
+# Comprehensive registry of Indian travel hub coordinates (Latitude, Longitude)
+CITY_GEO_COORDS: dict[str, tuple[float, float]] = {
+    "vijayawada": (16.5062, 80.6480),
+    "bezawada": (16.5062, 80.6480),
+    "guntur": (16.3067, 80.4365),
+    "amaravati": (16.5417, 80.5158),
+    "ongole": (15.5057, 80.0499),
+    "nellore": (14.4426, 79.9865),
+    "nellor": (14.4426, 79.9865),
+    "tirupati": (13.6288, 79.4192),
+    "tirumala": (13.6288, 79.4192),
+    "hyderabad": (17.3850, 78.4867),
+    "visakhapatnam": (17.6868, 83.2185),
+    "vizag": (17.6868, 83.2185),
+    "rajahmundry": (17.0005, 81.8040),
+    "kakinada": (16.9891, 82.2475),
+    "kurnool": (15.8281, 78.0373),
+    "anantapur": (14.6819, 77.6006),
+    "kadapa": (14.4673, 78.8242),
+    "chennai": (13.0827, 80.2707),
+    "bengaluru": (12.9716, 77.5946),
+    "bangalore": (12.9716, 77.5946),
+    "mysuru": (12.2958, 76.6394),
+    "mysore": (12.2958, 76.6394),
+    "delhi": (28.6139, 77.2090),
+    "new delhi": (28.6139, 77.2090),
+    "delhi ncr": (28.6139, 77.2090),
+    "mumbai": (19.0760, 72.8777),
+    "pune": (18.5204, 73.8567),
+    "goa": (15.2993, 74.1240),
+    "north goa": (15.5527, 73.7517),
+    "south goa": (15.2832, 73.9862),
+    "old goa": (15.5009, 73.9116),
+    "manali": (32.2396, 77.1887),
+    "shimla": (31.1048, 77.1734),
+    "dharamshala": (32.2190, 76.3234),
+    "jaipur": (26.9124, 75.7873),
+    "udaipur": (24.5854, 73.7125),
+    "jodhpur": (26.2389, 73.0243),
+    "agra": (27.1767, 78.0081),
+    "varanasi": (25.3176, 82.9739),
+    "kashi": (25.3176, 82.9739),
+    "kolkata": (22.5726, 88.3639),
+    "kochi": (9.9312, 76.2673),
+    "cochin": (9.9312, 76.2673),
+    "munnar": (10.0889, 77.0595),
+    "alleppey": (9.4981, 76.3388),
+    "alappuzha": (9.4981, 76.3388),
+    "rishikesh": (30.0869, 78.2676),
+    "haridwar": (29.9457, 78.1642),
+    "dehradun": (30.3165, 78.0322),
+}
+
+
+def get_city_coordinates(city_name: str) -> tuple[float, float] | None:
+    """Finds lat/lon for a city name using canonical mapping and fuzzy matching."""
+    if not city_name:
+        return None
+    name_clean = city_name.strip().lower()
+    if name_clean in CITY_GEO_COORDS:
+        return CITY_GEO_COORDS[name_clean]
+    for k, coords in CITY_GEO_COORDS.items():
+        if k in name_clean or name_clean in k:
+            return coords
+    return None
+
+
+def calculate_distance_km(coord1: tuple[float, float], coord2: tuple[float, float]) -> float:
+    """Calculates Haversine distance in kilometers between two lat/lon points."""
+    import math
+
+    lat1, lon1 = coord1
+    lat2, lon2 = coord2
+    r = 6371.0  # Earth radius in km
+
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return round(r * c, 1)
+
+
+def optimize_city_route(origin_name: str, candidate_cities: list[str]) -> list[str]:
+    """
+    Sequences candidate cities using a Nearest-Neighbor corridor starting from origin.
+    Prevents zig-zag backtracking (e.g., ensures Vijayawada -> Guntur -> Nellore -> Tirupati,
+    not Vijayawada -> Nellore -> Guntur -> Tirupati).
+    """
+    if len(candidate_cities) <= 1:
+        return list(candidate_cities)
+
+    # Normalize candidate list, preserving canonical casing
+    unique_candidates: list[str] = []
+    seen = set()
+    for c in candidate_cities:
+        c_clean = c.strip()
+        if c_clean.lower() not in seen and c_clean.lower() != origin_name.strip().lower():
+            seen.add(c_clean.lower())
+            unique_candidates.append(c_clean)
+
+    if len(unique_candidates) <= 1:
+        return unique_candidates
+
+    current_hub = origin_name.strip()
+    current_coords = get_city_coordinates(current_hub)
+
+    remaining = list(unique_candidates)
+    optimized_sequence: list[str] = []
+
+    while remaining:
+        if not current_coords:
+            optimized_sequence.extend(remaining)
+            break
+
+        best_city = remaining[0]
+        min_dist = float("inf")
+
+        for cand in remaining:
+            cand_coords = get_city_coordinates(cand)
+            if cand_coords:
+                dist = calculate_distance_km(current_coords, cand_coords)
+            else:
+                dist = 500.0
+            if dist < min_dist:
+                min_dist = dist
+                best_city = cand
+
+        optimized_sequence.append(best_city)
+        remaining.remove(best_city)
+        current_hub = best_city
+        current_coords = get_city_coordinates(best_city)
+
+    return optimized_sequence
+
+
+def reconcile_multi_city_itinerary(
+    out_dict: dict[str, Any],
+    raw_cities: list[str] | None = None,
+    origin_name: str = "Origin",
+    budget_val: float = 25000.0,
+) -> None:
+
+    """
+    Robustly reconciles multi-city itineraries by inspecting day themes, transit directions,
+    and activity locations to accurately assign each day's city. Establishes the true
+    chronological route sequence of cities visited, route legs, and stays.
+    """
+    if not isinstance(out_dict, dict):
+        return
+
+    days_list = out_dict.get("days", [])
+    if not isinstance(days_list, list) or len(days_list) == 0:
+        return
+
+    # If raw_cities not provided, extract from cities_visited or days
+    if not raw_cities:
+        raw_cities = out_dict.get("cities_visited") or []
+        if not raw_cities:
+            seen_c: list[str] = []
+            for d in days_list:
+                if isinstance(d, dict) and d.get("city"):
+                    c = str(d.get("city")).strip()
+                    if c and c not in seen_c:
+                        seen_c.append(c)
+            if len(seen_c) > 1:
+                raw_cities = seen_c
+
+    if not raw_cities or len(raw_cities) <= 1:
+        return
+
+    # Build canonical alias lookup
+    city_aliases: dict[str, str] = {}
+    for c in raw_cities:
+        clean = c.strip()
+        c_lower = clean.lower()
+        city_aliases[c_lower] = clean
+        if "nellor" in c_lower:
+            city_aliases["nellore"] = clean
+            city_aliases["nellor"] = clean
+        if "tirupati" in c_lower or "tirumala" in c_lower:
+            city_aliases["tirupati"] = clean
+            city_aliases["tirumala"] = clean
+        if "vijayawada" in c_lower or "bezawada" in c_lower:
+            city_aliases["vijayawada"] = clean
+            city_aliases["bezawada"] = clean
+        if "guntur" in c_lower:
+            city_aliases["guntur"] = clean
+        if "bengaluru" in c_lower or "bangalore" in c_lower:
+            city_aliases["bengaluru"] = clean
+            city_aliases["bangalore"] = clean
+        if "mysuru" in c_lower or "mysore" in c_lower:
+            city_aliases["mysuru"] = clean
+            city_aliases["mysore"] = clean
+        if "visakhapatnam" in c_lower or "vizag" in c_lower:
+            city_aliases["visakhapatnam"] = clean
+            city_aliases["vizag"] = clean
+        if "varanasi" in c_lower or "kashi" in c_lower or "banaras" in c_lower:
+            city_aliases["varanasi"] = clean
+            city_aliases["kashi"] = clean
+            city_aliases["banaras"] = clean
+
+    # Landmark to City dictionary for precision grounding
+    landmark_to_city: dict[str, str] = {
+        # Vijayawada landmarks
+        "kanaka durga": "vijayawada",
+        "undavalli": "vijayawada",
+        "prakasam barrage": "vijayawada",
+        "bhavani island": "vijayawada",
+        "kondapalli": "vijayawada",
+        "mangalagiri": "vijayawada",
+        "bapu museum": "vijayawada",
+        "gunadala": "vijayawada",
+        "amaravati": "vijayawada",
+        # Nellore landmarks
+        "mypadu": "nellore",
+        "ranganatha": "nellore",
+        "ranganathaswamy": "nellore",
+        "jonnawada": "nellore",
+        "nelapattu": "nellore",
+        "pulicat": "nellore",
+        "penna river": "nellore",
+        "narasimha swamy temple ghat": "nellore",
+        # Tirupati landmarks
+        "tirumala": "tirupati",
+        "venkateswara": "tirupati",
+        "govindaraja": "tirupati",
+        "kapila theertham": "tirupati",
+        "chandragiri": "tirupati",
+        "srikalahasti": "tirupati",
+        "padmavathi": "tirupati",
+        "alipiri": "tirupati",
+        # Visakhapatnam landmarks
+        "rk beach": "visakhapatnam",
+        "rushikonda": "visakhapatnam",
+        "kailasagiri": "visakhapatnam",
+        "submarine museum": "visakhapatnam",
+        "araku": "visakhapatnam",
+        "borra caves": "visakhapatnam",
+        "yarada": "visakhapatnam",
+        # Goa landmarks
+        "calangute": "north goa",
+        "baga": "north goa",
+        "anjuna": "north goa",
+        "vagator": "north goa",
+        "chapora": "north goa",
+        "fort aguada": "north goa",
+        "basilica of bom jesus": "old goa (panjim)",
+        "se cathedral": "old goa (panjim)",
+        "fontainhas": "old goa (panjim)",
+        "palolem": "south goa",
+        "agonda": "south goa",
+        "colva": "south goa",
+        "benaulim": "south goa",
+        "cabo de rama": "south goa",
+    }
+
+    def _find_city_in_text(text: str) -> str | None:
+        if not text:
+            return None
+        text_lower = text.lower()
+        for alias, canonical in city_aliases.items():
+            if re.search(r'\b' + re.escape(alias) + r'\b', text_lower):
+                return canonical
+        return None
+
+    def _find_landmark_in_text(text: str) -> str | None:
+        if not text:
+            return None
+        text_lower = text.lower()
+        for lm, target_c in landmark_to_city.items():
+            if lm in text_lower:
+                for alias, canonical in city_aliases.items():
+                    if target_c in alias or alias in target_c:
+                        return canonical
+        return None
+
+    def _find_transit_dest(text: str) -> str | None:
+        if not text:
+            return None
+        text_lower = text.lower()
+        m = re.search(r'(?:travel|head|drive|train|bus|depart)\s+(?:from\s+[a-zA-Z\s]+?\s+)?to\s+([a-zA-Z]+)', text_lower)
+        if m:
+            dest_word = m.group(1).strip()
+            for alias, canonical in city_aliases.items():
+                if alias in dest_word or dest_word in alias:
+                    return canonical
+        m2 = re.search(r'(?:arrive|reaching|reach)\s+(?:at\s+|in\s+)?([a-zA-Z]+)', text_lower)
+        if m2:
+            dest_word = m2.group(1).strip()
+            for alias, canonical in city_aliases.items():
+                if alias in dest_word or dest_word in alias:
+                    return canonical
+        return None
+
+    resolved_cities: list[str] = []
+    last_city = raw_cities[0]
+
+    for idx, day_item in enumerate(days_list):
+        if not isinstance(day_item, dict):
+            continue
+        theme = str(day_item.get("theme", ""))
+        morning = str(day_item.get("morning", ""))
+        afternoon = str(day_item.get("afternoon", ""))
+        evening = str(day_item.get("evening", ""))
+        night = str(day_item.get("night", ""))
+        day_text = f"{theme} {morning} {afternoon} {evening} {night}"
+
+        # 1. Theme exact city match
+        city_found = _find_city_in_text(theme)
+
+        # 2. Theme or day landmark match (high precision)
+        if not city_found:
+            city_found = _find_landmark_in_text(theme)
+        if not city_found:
+            city_found = _find_landmark_in_text(day_text)
+
+        # 3. Morning transit destination (e.g., "Travel from Tirupati to Nellore")
+        if not city_found:
+            city_found = _find_transit_dest(morning)
+
+        # 4. Afternoon/Evening/Night text matches
+        if not city_found:
+            combined_rest = f"{afternoon} {evening} {night}"
+            city_found = _find_city_in_text(combined_rest)
+
+        # 5. Morning text general matches
+        if not city_found:
+            city_found = _find_city_in_text(morning)
+
+        # 6. Check if day_item already had a valid city matching candidate
+        if not city_found:
+            existing = day_item.get("city")
+            if existing:
+                for alias, canonical in city_aliases.items():
+                    if alias in str(existing).lower():
+                        city_found = canonical
+                        break
+
+        # 7. Fallback to continuity with previous day
+        if not city_found:
+            city_found = last_city
+
+        last_city = city_found
+        day_item["city"] = city_found
+        resolved_cities.append(city_found)
+
+    # Determine sequence of unique cities visited (from day themes or Nearest-Neighbor Corridor)
+    ordered_from_days: list[str] = []
+    for c in resolved_cities:
+        if c not in ordered_from_days:
+            ordered_from_days.append(c)
+
+    if len(ordered_from_days) > 1:
+        ordered_visited = ordered_from_days
+        for c in raw_cities:
+            if c not in ordered_visited:
+                ordered_visited.append(c)
+    else:
+        ordered_visited = optimize_city_route(origin_name, raw_cities)
+        if not ordered_visited:
+            ordered_visited = list(raw_cities)
+
+    out_dict["cities_visited"] = ordered_visited
+    out_dict["destination_city"] = ordered_visited[0]
+
+
+    # Reconcile recommended stays
+    stays_list = out_dict.get("recommended_stays") or []
+    if not isinstance(stays_list, list):
+        stays_list = []
+    
+    existing_stay_cities = {str(s.get("city", "")).lower() for s in stays_list if isinstance(s, dict) and s.get("city")}
+    for c_name in ordered_visited:
+        if c_name.lower() not in existing_stay_cities:
+            stays_list.append({
+                "name": f"Hotel Bliss / Sidhartha ({c_name})",
+                "city": c_name,
+                "category": "Comfort 3-Star Stay",
+                "estimated_price_per_night": round(budget_val * 0.2 / max(1, len(ordered_visited)), 2),
+                "address_or_area": f"{c_name} Central Hub",
+                "why_recommended": f"Budget-matched accommodation selected for easy access to {c_name} attractions."
+            })
+    out_dict["recommended_stays"] = stays_list
+
+    # Calculate geographic route legs and corridor distances
+    city_seq = [origin_name] + ordered_visited
+    route_legs = []
+    total_opt_distance = 0.0
+
+    for idx in range(len(city_seq) - 1):
+        from_c = city_seq[idx]
+        to_c = city_seq[idx + 1]
+        coords_from = get_city_coordinates(from_c)
+        coords_to = get_city_coordinates(to_c)
+
+        if coords_from and coords_to:
+            leg_km = calculate_distance_km(coords_from, coords_to)
+        else:
+            leg_km = 120.0 + (idx * 40.0)
+        total_opt_distance += leg_km
+
+        # Realistic duration & transit recommendation based on distance
+        if leg_km <= 50:
+            dur_str = f"~45 mins ({leg_km:.0f} km)"
+            transit_opt = f"Local Intercity Express Train / APSRTC Express ({from_c} to {to_c})"
+        elif leg_km <= 150:
+            dur_str = f"~2 - 2.5 hrs ({leg_km:.0f} km)"
+            transit_opt = f"Superfast Express Train / State Express Bus ({from_c} to {to_c})"
+        elif leg_km <= 300:
+            dur_str = f"~3.5 - 4.5 hrs ({leg_km:.0f} km)"
+            transit_opt = f"Vande Bharat / Intercity Express Train ({from_c} to {to_c})"
+        else:
+            dur_str = f"~5 - 7 hrs ({leg_km:.0f} km)"
+            transit_opt = f"Express Rail / Overnight Sleeper Bus ({from_c} to {to_c})"
+
+        if idx == 0:
+            proximity_badge = "Nearest Adjacent First ✅"
+        elif idx == len(city_seq) - 2:
+            proximity_badge = "Farthest Final Stop 🏁"
+        else:
+            proximity_badge = "Corridor Progression 🚆"
+
+        route_legs.append({
+            "leg_number": idx + 1,
+            "from_city": from_c,
+            "to_city": to_c,
+            "route_title": f"{from_c} ➔ {to_c}",
+            "distance_km": leg_km,
+            "travel_duration": dur_str,
+            "proximity_badge": proximity_badge,
+            "mode": "Train / Bus",
+            "recommended_option": transit_opt,
+            "estimated_cost_per_person": round(max(80.0, leg_km * 1.5), 2),
+            "why_recommended": f"Optimized corridor leg connecting {from_c} to {to_c} with zero backtrack delay.",
+            "local_connect_tips": f"Auto-rickshaws and app cabs available at {to_c} arrival terminal."
+        })
+
+    # Compute unoptimized distance (if traveler had visited raw_cities in input order)
+    unopt_seq = [origin_name] + [c for c in raw_cities if c.lower() != origin_name.lower()]
+    unopt_distance = 0.0
+    for i in range(len(unopt_seq) - 1):
+        c1 = get_city_coordinates(unopt_seq[i])
+        c2 = get_city_coordinates(unopt_seq[i + 1])
+        if c1 and c2:
+            unopt_distance += calculate_distance_km(c1, c2)
+        else:
+            unopt_distance += 200.0
+
+    dist_saved = max(0.0, round(unopt_distance - total_opt_distance, 1))
+    time_saved_hrs = round(dist_saved / 55.0, 1) if dist_saved > 0 else 0.0
+
+    out_dict["route_analysis"] = {
+        "start_hub": origin_name,
+        "optimized_sequence": city_seq,
+        "total_distance_km": round(total_opt_distance, 1),
+        "unoptimized_distance_km": round(unopt_distance, 1),
+        "distance_saved_km": dist_saved,
+        "time_saved_hours": time_saved_hrs,
+        "legs": route_legs,
+        "corridor_summary": (
+            f"Optimal route starts at {origin_name}, visiting nearest adjacent hub ({ordered_visited[0]}) first "
+            f"and progressing sequentially to {ordered_visited[-1]}, saving {dist_saved:.0f} km "
+            f"and ~{time_saved_hrs} hours of unnecessary backtracking!"
+        ) if dist_saved > 0 else f"Direct geographic route linking {origin_name} to {ordered_visited[0]}."
+    }
+
+    inter_transit_raw = out_dict.get("intercity_transport")
+    inter_transit = inter_transit_raw if isinstance(inter_transit_raw, dict) else {
+        "mode": "Train / Bus",
+        "recommended_option": f"Multi-City Route Transit ({' ➔ '.join(city_seq)})",
+        "estimated_cost_per_person": sum(leg["estimated_cost_per_person"] for leg in route_legs),
+        "travel_duration": "Multi-leg journey",
+        "why_recommended": "Optimized sequential transit linking all target destinations.",
+        "local_connect_tips": "Local auto-rickshaws and cabs available at each transit station."
+    }
+    inter_transit["route_legs"] = route_legs
+    inter_transit["recommended_option"] = f"Multi-City Route Transit ({' ➔ '.join(city_seq)})"
+    out_dict["intercity_transport"] = inter_transit
+
 
 
 def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -243,91 +742,13 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
         # Multi-city normalization & strict activity-city matching
         is_multi = bool(inputs.get("multi_city"))
         raw_cities = [c.strip() for c in str(inputs.get("cities", "")).split(",") if c.strip()]
-        if len(raw_cities) > 1:
-            out_dict["cities_visited"] = raw_cities
-            out_dict["destination_city"] = raw_cities[0]
-            days_list = out_dict.get("days", [])
-            if isinstance(days_list, list) and len(days_list) > 0:
-                num_days = len(days_list)
-                num_cities = len(raw_cities)
-                for idx, day_item in enumerate(days_list):
-                    if isinstance(day_item, dict):
-                        # Scan text of morning, afternoon, evening, night for actual city name
-                        day_content = " ".join([
-                            str(day_item.get("theme", "")),
-                            str(day_item.get("morning", "")),
-                            str(day_item.get("afternoon", "")),
-                            str(day_item.get("evening", "")),
-                            str(day_item.get("night", "")),
-                            str(day_item.get("city", ""))
-                        ]).lower()
+        if len(raw_cities) <= 1 and out_dict.get("cities_visited") and isinstance(out_dict["cities_visited"], list) and len(out_dict["cities_visited"]) > 1:
+            raw_cities = [str(c).strip() for c in out_dict["cities_visited"] if str(c).strip()]
 
-                        matched_city = None
-                        for c_candidate in raw_cities:
-                            if c_candidate.lower() in day_content:
-                                matched_city = c_candidate
-                                break
-                        
-                        if matched_city:
-                            day_item["city"] = matched_city
-                        else:
-                            city_idx = min(idx * num_cities // num_days, num_cities - 1)
-                            day_item["city"] = raw_cities[city_idx]
-            
-            # Ensure multi-city stay list covers every visited city
-            stays_list = out_dict.get("recommended_stays") or []
-            if not isinstance(stays_list, list):
-                stays_list = []
-            if out_dict.get("recommended_stay") and isinstance(out_dict["recommended_stay"], dict):
-                first_stay = out_dict["recommended_stay"]
-                if not first_stay.get("city"):
-                    first_stay["city"] = raw_cities[0]
-                if not any(s.get("city", "").lower() == raw_cities[0].lower() for s in stays_list if isinstance(s, dict)):
-                    stays_list.insert(0, first_stay)
-            
-            existing_stay_cities = {s.get("city", "").lower() for s in stays_list if isinstance(s, dict) and s.get("city")}
-            for c_name in raw_cities:
-                if c_name.lower() not in existing_stay_cities:
-                    stays_list.append({
-                        "name": f"Hotel Bliss / Sidhartha ({c_name})",
-                        "city": c_name,
-                        "category": "Comfort 3-Star Stay",
-                        "estimated_price_per_night": round(clean_float(inputs.get("budget"), 5000.0) * 0.2 / max(1, len(raw_cities)), 2),
-                        "address_or_area": f"{c_name} Central Hub",
-                        "why_recommended": f"Budget-matched accommodation selected for easy access to {c_name} attractions."
-                    })
-            # Multi-leg route legs generation
+        if len(raw_cities) > 1:
             origin_name = str(inputs.get("origin", "Origin")).strip()
-            city_seq = [origin_name] + raw_cities
-            route_legs = []
-            for idx in range(len(city_seq) - 1):
-                from_c = city_seq[idx]
-                to_c = city_seq[idx + 1]
-                route_legs.append({
-                    "leg_number": idx + 1,
-                    "from_city": from_c,
-                    "to_city": to_c,
-                    "route_title": f"{from_c} ➔ {to_c}",
-                    "mode": "Train / Bus",
-                    "recommended_option": f"APSRTC Express Bus / Intercity Express Train ({from_c} to {to_c})",
-                    "estimated_cost_per_person": 150.0 + (idx * 100.0),
-                    "travel_duration": f"{3 + (idx % 2)} hrs",
-                    "why_recommended": f"Frequent, comfortable, and direct transit option connecting {from_c} to {to_c}.",
-                    "local_connect_tips": f"Use auto-rickshaws or app cabs from {to_c} arrival station/bus stand to your hotel."
-                })
-            
-            inter_transit_raw = out_dict.get("intercity_transport")
-            inter_transit: dict[str, Any] = inter_transit_raw if isinstance(inter_transit_raw, dict) else {
-                "mode": "Train / Bus",
-                "recommended_option": f"Multi-City Route Transit ({' ➔ '.join(city_seq)})",
-                "estimated_cost_per_person": sum(leg["estimated_cost_per_person"] for leg in route_legs),
-                "travel_duration": "Multi-leg journey",
-                "why_recommended": "Optimized sequential transit linking all target destinations.",
-                "local_connect_tips": "Local auto-rickshaws and cabs available at each transit station."
-            }
-            inter_transit["route_legs"] = route_legs
-            out_dict["intercity_transport"] = inter_transit
-            out_dict["recommended_stays"] = stays_list
+            budget_val = clean_float(inputs.get("budget"), 25000.0)
+            reconcile_multi_city_itinerary(out_dict, raw_cities=raw_cities, origin_name=origin_name, budget_val=budget_val)
         elif not is_multi:
             out_dict["cities_visited"] = None
 
@@ -371,8 +792,8 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
         user_budget = inputs.get("budget")
         if user_budget is not None:
             try:
-                target_budget = float(user_budget)
-                tot_cost = float(out_dict.get("total_estimated_cost", 0.0))
+                target_budget = clean_float(user_budget, 0.0)
+                tot_cost = clean_float(out_dict.get("total_estimated_cost"), 0.0)
                 currency = str(out_dict.get("currency") or inputs.get("currency") or "INR").strip()
                 sym = "₹" if currency == "INR" else ("$" if currency == "USD" else ("€" if currency == "EUR" else f"{currency} "))
 
@@ -724,8 +1145,12 @@ async def get_shareable_trip(job_id: str):
         raise HTTPException(status_code=404, detail="Itinerary data is unavailable.")
 
     # Explicitly clean and ensure strictly public TripItinerary fields
+    if isinstance(result, dict) and (result.get("cities_visited") or any(isinstance(d, dict) and d.get("city") for d in result.get("days", []))):
+        reconcile_multi_city_itinerary(result)
+
     clean_itinerary = {
         "destination_city": result.get("destination_city"),
+        "cities_visited": result.get("cities_visited"),
         "destination_country": result.get("destination_country"),
         "trip_length_days": result.get("trip_length_days"),
         "currency": result.get("currency", "INR"),
@@ -898,6 +1323,102 @@ async def export_trip_pdf_endpoint(job_id: str):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+def _generate_itinerary_ics(job_id: str, itinerary: dict[str, Any]) -> bytes:
+    """
+    Builds a standard RFC 5545 iCalendar (.ics) file containing scheduled daily itinerary events.
+    Compatible with Google Calendar, Apple Calendar, and Outlook.
+    """
+    from datetime import datetime, timedelta
+
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//AI Trip Planner//Trip Itinerary//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:Trip to {itinerary.get('destination_city', 'Destination')}",
+    ]
+
+    # Parse start date or default to tomorrow
+    start_date_str = itinerary.get("start_date") or itinerary.get("travel_date")
+    start_dt = None
+    if start_date_str:
+        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d"):
+            try:
+                start_dt = datetime.strptime(start_date_str.strip(), fmt)
+                break
+            except ValueError:
+                pass
+    if not start_dt:
+        start_dt = datetime.now() + timedelta(days=1)
+
+    now_utc_str = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    days = itinerary.get("days", [])
+    city_name = itinerary.get("destination_city", "Destination")
+
+    for idx, day in enumerate(days):
+        if not isinstance(day, dict):
+            continue
+        curr_dt = start_dt + timedelta(days=idx)
+        date_prefix = curr_dt.strftime("%Y%m%d")
+        day_num = day.get("day_number", idx + 1)
+        theme = day.get("theme", f"Day {day_num}")
+        day_city = day.get("city", city_name)
+
+        slots = [
+            ("Morning", "090000", "120000", day.get("morning")),
+            ("Afternoon", "130000", "170000", day.get("afternoon")),
+            ("Evening", "180000", "210000", day.get("evening")),
+        ]
+
+        for slot_name, t_start, t_end, activity_desc in slots:
+            if not activity_desc:
+                continue
+            clean_desc = str(activity_desc).replace("\n", " ").replace("\r", " ").replace(";", "\\;").replace(",", "\\,")
+            summary = f"Day {day_num} {slot_name}: {theme}"
+            uid = f"trip-{job_id[:8]}-day{day_num}-{slot_name.lower()}@tripplanner.ai"
+
+            lines.extend([
+                "BEGIN:VEVENT",
+                f"UID:{uid}",
+                f"DTSTAMP:{now_utc_str}",
+                f"DTSTART:{date_prefix}T{t_start}",
+                f"DTEND:{date_prefix}T{t_end}",
+                f"SUMMARY:{summary}",
+                f"DESCRIPTION:{clean_desc}",
+                f"LOCATION:{day_city}",
+                "STATUS:CONFIRMED",
+                "END:VEVENT",
+            ])
+
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines).encode("utf-8")
+
+
+@app.get("/api/trip/{job_id}/calendar.ics")
+async def export_trip_calendar_endpoint(job_id: str):
+    """
+    Generates and exports standard RFC 5545 iCalendar (.ics) format for Google/Apple Calendar.
+    """
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Trip job not found")
+    if job.get("status") != "complete" or not job.get("result"):
+        raise HTTPException(status_code=400, detail="Cannot export Calendar for an incomplete or failed trip job")
+
+    ics_bytes = _generate_itinerary_ics(job_id, job["result"])
+    city_slug = job["result"].get("destination_city", "trip").lower().replace(" ", "_")
+    filename = f"trip_{city_slug}_{job_id[:8]}.ics"
+    return Response(
+        content=ics_bytes,
+        media_type="text/calendar",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Type": "text/calendar; charset=utf-8",
+        },
     )
 
 
@@ -1204,10 +1725,14 @@ async def get_job_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    res_data = job.get("result")
+    if isinstance(res_data, dict) and (res_data.get("cities_visited") or any(isinstance(d, dict) and d.get("city") for d in res_data.get("days", []))):
+        reconcile_multi_city_itinerary(res_data)
+
     return JobStatusResponse(
         job_id=job_id,
         status=job["status"],
-        result=job.get("result"),
+        result=res_data,
         error=job.get("error"),
         created_at=job.get("created_at"),
         travel_date=job.get("travel_date"),
@@ -1456,6 +1981,7 @@ async def inspire_from_photo(file: UploadFile = File(...)):
 
 
 @app.get("/")
+@app.get("/index.html")
 async def serve_index():
     """Serves the frontend dashboard index.html."""
     index_file = FRONTEND_DIR / "index.html"
