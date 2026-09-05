@@ -643,3 +643,11 @@ class DestinationQuestion(BaseModel):
 
 # Alias QuestionAnswer to QAResponse for backward compatibility
 QuestionAnswer = QAResponse
+
+
+class EvaluationResult(BaseModel):
+    """Output of the Budget & Quality Evaluator agent."""
+
+    passes: bool = Field(..., description="True if itinerary meets budget ceiling and quality checks")
+    feedback: str = Field(..., description="Specific and actionable feedback on failures or confirmation")
+

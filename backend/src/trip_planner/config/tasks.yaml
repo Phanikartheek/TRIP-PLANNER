@@ -57,3 +57,19 @@ answer_destination_question_task:
   expected_output: >-
     QAResponse with answer containing specific recommendations and details, grounded_claims, ungrounded_claims, and sources.
   agent: local_qa_expert
+
+evaluate_itinerary_task:
+  description: >-
+    Evaluate the generated trip itinerary for {destination_city} strictly against the requested budget: {budget}.
+    Criteria to verify:
+    1. Hard Budget Check: total_estimated_cost must be less than or equal to requested budget {budget}.
+    2. No Padding: No generic "Miscellaneous" or vague catch-all line items exceeding 25% of any day's cost.
+    3. Specificity: All cost_breakdown items must be specific, named attractions/restaurants/transport modes, not vague filler.
+    Itinerary under review:
+    {itinerary}
+    If the itinerary meets all criteria, set passes: true and provide brief positive feedback.
+    If it fails any criterion, set passes: false and provide specific, actionable feedback (e.g. "Day 2 cost of ₹8,000 exceeds remaining budget - cut hotel or dining costs" or "Day 1 has generic Miscellaneous line item of ₹2,500 exceeding 25%").
+  expected_output: >-
+    EvaluationResult with passes boolean and specific actionable feedback.
+  agent: budget_evaluator
+
