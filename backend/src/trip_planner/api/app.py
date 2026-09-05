@@ -732,7 +732,7 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
         out_dict = multi_itinerary.model_dump()
         out_dict["orchestrator_used"] = True
     else:
-        logger.info(f"[_run_crew_sync] Single-city request detected. Executing standard crew pipeline with evaluator loop.")
+        logger.info("[_run_crew_sync] Single-city request detected. Executing standard crew pipeline with evaluator loop.")
         from trip_planner.crew import TripPlannerCrew
         crew_instance = TripPlannerCrew()
         out_dict = crew_instance.run_with_evaluator_loop(inputs=inputs)

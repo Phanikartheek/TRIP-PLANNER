@@ -6,7 +6,7 @@ objects, attaches tools and the LLM, and assembles the sequential crew.
 import os
 import sys
 import time
-from typing import Any, cast
+from typing import Any
 
 import litellm
 from dotenv import load_dotenv
@@ -628,6 +628,7 @@ class TripPlannerCrew:
 
         out_dict = refined_itinerary.model_dump()
         out_dict["route_decision"] = route_decision.model_dump()
+        out_dict["research_summary"] = research_data.model_dump()
         out_dict["evaluation_report"] = eval_report.model_dump()
         out_dict["optimization_passes"] = passes
         return out_dict

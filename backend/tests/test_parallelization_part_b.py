@@ -8,6 +8,7 @@ Verifies:
 
 import json
 import time
+
 from trip_planner.patterns.parallelizer import (
     ParallelCityResearchTool,
     ParallelResearcher,

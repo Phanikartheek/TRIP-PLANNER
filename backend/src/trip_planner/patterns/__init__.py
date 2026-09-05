@@ -6,17 +6,11 @@ Four Agentic Workflow Patterns for AI Trip Planner:
 4. Evaluator-Optimizer (EvaluatorOptimizer, ItineraryEvaluator, ItineraryOptimizer, EvaluationReport)
 """
 
-from trip_planner.patterns.router import (
-    IntentClassificationResult,
-    RouteDecision,
-    TravelerPersona,
-    TripRouter,
-    TripTopology,
-    UserIntent,
-)
-from trip_planner.patterns.parallelizer import (
-    ConsolidatedResearch,
-    ParallelResearcher,
+from trip_planner.patterns.evaluator_optimizer import (
+    EvaluationReport,
+    EvaluatorOptimizer,
+    ItineraryEvaluator,
+    ItineraryOptimizer,
 )
 from trip_planner.patterns.orchestrator import (
     DayPlanWorker,
@@ -26,11 +20,17 @@ from trip_planner.patterns.orchestrator import (
     TripPlanOutline,
     TripSubtask,
 )
-from trip_planner.patterns.evaluator_optimizer import (
-    EvaluationReport,
-    EvaluatorOptimizer,
-    ItineraryEvaluator,
-    ItineraryOptimizer,
+from trip_planner.patterns.parallelizer import (
+    ConsolidatedResearch,
+    ParallelResearcher,
+)
+from trip_planner.patterns.router import (
+    IntentClassificationResult,
+    RouteDecision,
+    TravelerPersona,
+    TripRouter,
+    TripTopology,
+    UserIntent,
 )
 
 __all__ = [

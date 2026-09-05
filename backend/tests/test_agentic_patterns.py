@@ -6,17 +6,11 @@ Unit tests for the Four Agentic Workflow Patterns:
 4. Evaluator-Optimizer Pattern (EvaluatorOptimizer)
 """
 
-import pytest
 from trip_planner.patterns import (
     ConsolidatedResearch,
-    DayPlanWorker,
-    EvaluationReport,
     EvaluatorOptimizer,
     ItineraryEvaluator,
-    ItineraryOptimizer,
     ParallelResearcher,
-    StayWorker,
-    TransitWorker,
     TravelerPersona,
     TripOrchestrator,
     TripRouter,
@@ -28,7 +22,6 @@ from trip_planner.schemas.models import (
     ItineraryDay,
     TripItinerary,
 )
-
 
 # ==========================================
 # 1. ROUTING PATTERN TESTS

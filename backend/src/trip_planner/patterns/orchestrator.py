@@ -6,7 +6,8 @@ and synthesizes their individual deliverables into a unified TripItinerary.
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from trip_planner.schemas.models import (
@@ -58,8 +59,8 @@ class DayPlanWorker:
             city=city,
             theme=f"{city} Exploration & Culture",
             morning=f"Visit prime landmark and heritage sights in {city}.",
-            afternoon=f"Explore vibrant local markets, artisan stores, and savor famous regional dishes.",
-            evening=f"Scenic evening walk, cultural sunset viewpoint, and relaxing dinner.",
+            afternoon="Explore vibrant local markets, artisan stores, and savor famous regional dishes.",
+            evening="Scenic evening walk, cultural sunset viewpoint, and relaxing dinner.",
             estimated_cost=round(budget_for_day, 2),
             cost_breakdown=breakdown,
             weather_note=f"Pleasant conditions in {city}, ideal for sightseeing.",
@@ -138,9 +139,9 @@ class TripOrchestrator:
 
     def __init__(
         self,
-        day_worker: Optional[DayPlanWorker] = None,
-        stay_worker: Optional[StayWorker] = None,
-        transit_worker: Optional[TransitWorker] = None,
+        day_worker: DayPlanWorker | None = None,
+        stay_worker: StayWorker | None = None,
+        transit_worker: TransitWorker | None = None,
     ):
         self.day_worker = day_worker or DayPlanWorker()
         self.stay_worker = stay_worker or StayWorker()

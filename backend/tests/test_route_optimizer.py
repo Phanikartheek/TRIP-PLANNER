@@ -1,4 +1,3 @@
-import pytest
 from trip_planner.api.app import (
     calculate_distance_km,
     get_city_coordinates,

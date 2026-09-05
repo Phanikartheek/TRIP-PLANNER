@@ -10,9 +10,8 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any
 import urllib.parse
-
+from typing import Any
 
 SERVER_INFO = {
     "name": "ai-trip-planner",
@@ -122,12 +121,14 @@ def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         orig = arguments.get("origin", "").strip()
         dest = arguments.get("destination", "").strip()
         t_date = arguments.get("travel_date", "")
+        date_str = f" for {t_date}" if t_date else ""
 
         train_link = f"https://www.confirmtkt.com/trains/{urllib.parse.quote(orig)}-to-{urllib.parse.quote(dest)}"
         bus_link = f"https://www.redbus.in/bus-tickets/{urllib.parse.quote(orig.lower())}-to-{urllib.parse.quote(dest.lower())}"
         flight_link = f"https://www.google.com/travel/flights?q=flights+from+{urllib.parse.quote(orig)}+to+{urllib.parse.quote(dest)}"
 
         output = (
+            f"Transit options from {orig} to {dest}{date_str}:\n"
             f"🚆 ConfirmTkt / IRCTC Trains: {train_link}\n"
             f"🚌 RedBus Buses: {bus_link}\n"
             f"✈️ Google Flights: {flight_link}"

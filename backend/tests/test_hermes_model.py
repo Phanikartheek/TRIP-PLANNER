@@ -1,7 +1,4 @@
-import os
-from unittest.mock import patch
 import pytest
-
 from trip_planner.crew import TripPlannerCrew
 
 

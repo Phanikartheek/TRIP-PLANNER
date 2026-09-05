@@ -10,7 +10,6 @@ Verifies:
 from trip_planner.patterns.orchestrator import (
     DayPlanWorker,
     StayWorker,
-    TransitWorker,
     TripOrchestrator,
     TripPlanOutline,
 )

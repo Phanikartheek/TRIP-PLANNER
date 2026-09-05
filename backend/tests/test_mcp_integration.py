@@ -1,8 +1,6 @@
-import json
-import pytest
 
+from trip_planner.mcp_server import TOOLS_REGISTRY, handle_json_rpc
 from trip_planner.tools.mcp_client import MCPClient, MCPToolAdapter
-from trip_planner.mcp_server import handle_json_rpc, TOOLS_REGISTRY
 
 
 def test_mcp_server_initialize():

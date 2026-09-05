@@ -8,6 +8,7 @@ Verifies the Budget & Quality Evaluator agent logic:
 """
 
 from unittest.mock import MagicMock
+
 from trip_planner.crew import TripPlannerCrew
 from trip_planner.schemas.models import EvaluationResult
 

@@ -4,7 +4,7 @@ Iterative evaluation and refinement loop ensuring itineraries strictly meet
 budget ceilings, sensible pacing, geographic continuity, and content completeness.
 """
 
-from typing import Optional
+
 from pydantic import BaseModel, Field
 
 from trip_planner.schemas.models import TripItinerary
@@ -27,7 +27,7 @@ class ItineraryEvaluator:
     def __init__(self, pass_threshold: float = 0.85):
         self.pass_threshold = pass_threshold
 
-    def evaluate(self, itinerary: TripItinerary, target_budget: Optional[float] = None) -> EvaluationReport:
+    def evaluate(self, itinerary: TripItinerary, target_budget: float | None = None) -> EvaluationReport:
         critique: list[str] = []
         optimizations: list[str] = []
         score = 1.0
@@ -102,8 +102,8 @@ class ItineraryOptimizer:
         self,
         itinerary: TripItinerary,
         report: EvaluationReport,
-        target_budget: Optional[float] = None,
-        default_origin: Optional[str] = None,
+        target_budget: float | None = None,
+        default_origin: str | None = None,
     ) -> TripItinerary:
         """
         Applies fixes for all flagged critique items.
@@ -160,8 +160,8 @@ class EvaluatorOptimizer:
     def run_optimization_loop(
         self,
         candidate: TripItinerary,
-        target_budget: Optional[float] = None,
-        default_origin: Optional[str] = None,
+        target_budget: float | None = None,
+        default_origin: str | None = None,
     ) -> tuple[TripItinerary, EvaluationReport, int]:
         """
         Executes the iterative review-optimize loop until passing or max passes reached.

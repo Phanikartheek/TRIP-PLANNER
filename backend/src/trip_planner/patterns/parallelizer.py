@@ -5,9 +5,11 @@ local festivals/events, nearby day-trips, and local dining/transit)
 rather than blocking sequentially, significantly accelerating city research.
 """
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
-from typing import Any, Callable, Optional, Type
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
+
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
@@ -38,7 +40,7 @@ class ParallelResearcher:
     Executes multiple distinct research subtasks concurrently using worker thread pools.
     """
 
-    def __init__(self, max_workers: int = 5, search_fn: Optional[Callable[[str], str]] = None):
+    def __init__(self, max_workers: int = 5, search_fn: Callable[[str], str] | None = None):
         self.max_workers = max_workers
         self.search_fn = search_fn
 
@@ -52,7 +54,7 @@ class ParallelResearcher:
         except Exception as e:
             return f"Search error for '{query}': {e}"
 
-    def gather_weather(self, city: str, travel_date: Optional[str] = None) -> str:
+    def gather_weather(self, city: str, travel_date: str | None = None) -> str:
         q = f"{city} India weather travel season forecast {travel_date or ''}".strip()
         res = self._default_search(q)
         return res[:400] if res else f"Typical pleasant travel weather in {city}."
@@ -68,13 +70,13 @@ class ParallelResearcher:
         q = f"Best famous local food restaurants must eat dishes {city} India"
         res = self._default_search(q)
         lines = [line.strip("- *• \t\r\n") for line in res.split("\n") if line.strip()]
-        return [l for l in lines if len(l) > 10][:5] or [f"Authentic local {city} thali and regional specialties."]
+        return [item for item in lines if len(item) > 10][:5] or [f"Authentic local {city} thali and regional specialties."]
 
     def gather_attractions(self, city: str, interests: str = "") -> list[Attraction]:
         q = f"Top tourist attractions landmarks sights entry ticket fee in {city} India {interests}"
         res = self._default_search(q)
         attractions: list[Attraction] = []
-        lines = [l.strip("- *• \t\r\n") for l in res.split("\n") if l.strip()]
+        lines = [line.strip("- *• \t\r\n") for line in res.split("\n") if line.strip()]
         for line in lines[:6]:
             if len(line) > 15:
                 # Check for estimated fee
@@ -88,7 +90,7 @@ class ParallelResearcher:
         if not attractions:
             attractions = [
                 Attraction(name=f"Historic Central {city}", description=f"Prime landmark and cultural district of {city}.", estimated_cost=0.0),
-                Attraction(name=f"{city} Heritage Corridor", description=f"Scenic promenade and architectural highlight.", estimated_cost=50.0),
+                Attraction(name=f"{city} Heritage Corridor", description="Scenic promenade and architectural highlight.", estimated_cost=50.0),
             ]
         return attractions[:5]
 
@@ -182,7 +184,7 @@ class ParallelResearcher:
         city: str,
         interests: str = "",
         currency: str = "INR",
-        travel_date: Optional[str] = None,
+        travel_date: str | None = None,
     ) -> CityGuide:
         """
         Gathers complete CityGuide by dispatching 5 independent research tasks in parallel.
@@ -226,7 +228,7 @@ class ParallelResearcher:
         destination: str,
         interests: str = "",
         budget: float = 25000.0,
-        travel_date: Optional[str] = None,
+        travel_date: str | None = None,
     ) -> ConsolidatedResearch:
         """
         Dispatches all independent research tasks to the thread pool concurrently.
@@ -271,7 +273,7 @@ class ParallelCityResearchTool(BaseTool):
     """CrewAI tool providing concurrent multi-area city research in a single call."""
     name: str = "parallel_city_research"
     description: str = "Concurrently researches attractions, emergency contacts, local festivals, day trips, and dining for a city in parallel."
-    args_schema: Type[BaseModel] = ParallelCityResearchInput
+    args_schema: type[BaseModel] = ParallelCityResearchInput
 
     def _run(self, city: str, interests: str = "") -> str:
         researcher = ParallelResearcher()

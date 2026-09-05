@@ -8,9 +8,11 @@ standard Model Context Protocol (MCP) servers (JSON-RPC 2.0).
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Type
-from pydantic import BaseModel, Field, create_model
+from collections.abc import Callable
+from typing import Any
+
 from crewai.tools import BaseTool
+from pydantic import Field
 
 
 class MCPToolAdapter(BaseTool):

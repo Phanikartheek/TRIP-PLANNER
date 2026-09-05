@@ -8,7 +8,6 @@ Verifies:
 
 import pytest
 from fastapi.testclient import TestClient
-
 from trip_planner.api import db
 from trip_planner.api.app import app
 from trip_planner.patterns.router import IntentClassificationResult, TripRouter, UserIntent
