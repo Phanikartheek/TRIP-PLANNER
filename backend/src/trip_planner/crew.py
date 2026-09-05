@@ -290,9 +290,10 @@ class TripPlannerCrew:
 
     @agent
     def local_expert(self) -> Agent:
+        from trip_planner.patterns.parallelizer import ParallelCityResearchTool
         return _create_agent(
             config=self.agents_config["local_expert"],
-            tools=[DuckDuckGoSearchTool(), build_scrape_tool()],
+            tools=[DuckDuckGoSearchTool(), build_scrape_tool(), ParallelCityResearchTool()],
             llm=self._get_llm(),
             verbose=True,
             max_iter=3,
