@@ -385,11 +385,11 @@ def update_checklist_item(job_id: str, item: str, checked: bool, db_path: Path |
     found = False
     for el in checklist:
         if el.get("item") == item:
-            el["checked"] = bool(checked)
+            el["checked"] = checked
             found = True
             break
     if not found:
-        checklist.append({"item": item, "checked": bool(checked)})
+        checklist.append({"item": item, "checked": checked})
 
     update_job(job_id, checklist_state=checklist, db_path=db_path)
     return checklist
