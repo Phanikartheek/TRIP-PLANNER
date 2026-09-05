@@ -529,6 +529,9 @@ class TripItinerary(BaseModel):
     budget_exceeded_warning: str | None = Field(
         default=None, description="Deterministic budget-overrun warning message if initial cost exceeded requested budget"
     )
+    orchestrator_used: bool = Field(
+        default=False, description="True if generated via multi-city Orchestrator-Workers pattern"
+    )
     emergency_info: EmergencyInfo | None = Field(
         default=None, description="Search-grounded emergency safety contacts (hospital & police)"
     )

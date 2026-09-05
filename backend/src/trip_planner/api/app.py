@@ -719,12 +719,25 @@ def reconcile_multi_city_itinerary(
 
 def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
     """
-    Executes the TripPlannerCrew sequentially in a synchronous worker thread.
+    Executes trip planning in a worker thread:
+    - Multi-city trips: Dispatches to the Orchestrator-Workers pipeline (concurrent city workers & synthesis)
+    - Single-city trips: Bypasses orchestrator and runs standard crew pipeline with evaluator loop
     """
-    from trip_planner.crew import TripPlannerCrew
+    from trip_planner.patterns.orchestrator import TripOrchestrator
 
-    crew_instance = TripPlannerCrew()
-    out_dict = crew_instance.run_with_evaluator_loop(inputs=inputs)
+    if TripOrchestrator.should_use_orchestrator(inputs):
+        logger.info(f"[_run_crew_sync] Multi-city request detected. Executing Orchestrator-Workers pipeline for: {inputs.get('cities')}")
+        orchestrator = TripOrchestrator()
+        multi_itinerary = orchestrator.orchestrate_itinerary(inputs)
+        out_dict = multi_itinerary.model_dump()
+        out_dict["orchestrator_used"] = True
+    else:
+        logger.info(f"[_run_crew_sync] Single-city request detected. Executing standard crew pipeline with evaluator loop.")
+        from trip_planner.crew import TripPlannerCrew
+        crew_instance = TripPlannerCrew()
+        out_dict = crew_instance.run_with_evaluator_loop(inputs=inputs)
+        if isinstance(out_dict, dict):
+            out_dict["orchestrator_used"] = False
 
     if isinstance(out_dict, dict):
         # Store origin_city from inputs if available
