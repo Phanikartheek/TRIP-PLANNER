@@ -682,6 +682,9 @@ def reconcile_multi_city_itinerary(
     dist_saved = max(0.0, round(unopt_distance - total_opt_distance, 1))
     time_saved_hrs = round(dist_saved / 55.0, 1) if dist_saved > 0 else 0.0
 
+    if origin_name and origin_name.lower() != "origin":
+        out_dict["origin_city"] = origin_name
+
     out_dict["route_analysis"] = {
         "start_hub": origin_name,
         "optimized_sequence": city_seq,
@@ -733,24 +736,65 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
         out_dict = {"raw_output": str(result)}
 
     if isinstance(out_dict, dict):
+        # Store origin_city from inputs if available
+        orig_val = inputs.get("origin")
+        if orig_val and str(orig_val).strip() and str(orig_val).strip().lower() != "origin":
+            out_dict["origin_city"] = str(orig_val).strip()
+
         if "travelers" in inputs:
             req_travelers = int(inputs.get("travelers", 1))
             out_dict["travelers"] = req_travelers
             tot_cost = clean_float(out_dict.get("total_estimated_cost"), 0.0)
             out_dict["cost_per_person"] = round(tot_cost / max(1, req_travelers), 2)
 
-        # Multi-city normalization & strict activity-city matching
-        is_multi = bool(inputs.get("multi_city"))
-        raw_cities = [c.strip() for c in str(inputs.get("cities", "")).split(",") if c.strip()]
-        if len(raw_cities) <= 1 and out_dict.get("cities_visited") and isinstance(out_dict["cities_visited"], list) and len(out_dict["cities_visited"]) > 1:
-            raw_cities = [str(c).strip() for c in out_dict["cities_visited"] if str(c).strip()]
+        # Multi-city normalization & strict single vs multi-city handling
+        user_cities_str = str(inputs.get("cities", "")).strip()
+        user_city_list = [c.strip() for c in user_cities_str.split(",") if c.strip()]
+        is_multi_req = bool(inputs.get("multi_city")) and len(user_city_list) > 1
 
-        if len(raw_cities) > 1:
+        if not is_multi_req and len(user_city_list) == 1:
+            # Single-destination trip: strictly enforce ONLY the user's requested destination city
+            target_city = user_city_list[0]
+            out_dict["destination_city"] = target_city
+            out_dict["cities_visited"] = None
+            out_dict["route_analysis"] = None
+
+            # Ensure all days belong exclusively to target_city
+            days_list = out_dict.get("days", [])
+            if isinstance(days_list, list):
+                for day in days_list:
+                    if isinstance(day, dict):
+                        day["city"] = target_city
+
+            # Ensure intercity transit only connects Origin -> Target City (zero multi-city route legs)
+            origin_name = str(inputs.get("origin", "Origin")).strip()
+            inter_transit = out_dict.get("intercity_transport")
+            if not isinstance(inter_transit, dict):
+                inter_transit = {}
+            inter_transit["route_legs"] = []
+            if origin_name.lower() != target_city.lower():
+                inter_transit["recommended_option"] = f"APSRTC Bus or Express Train ({origin_name} to {target_city})"
+                inter_transit["why_recommended"] = f"{target_city} is the primary destination. Direct transit connecting {origin_name} to {target_city}."
+                inter_transit["travel_duration"] = inter_transit.get("travel_duration") if (inter_transit.get("travel_duration") and "N/A" not in inter_transit.get("travel_duration", "")) else "Direct journey"
+            else:
+                inter_transit["recommended_option"] = f"Local Transit in {target_city}"
+                inter_transit["why_recommended"] = f"Trip is based locally in {target_city}."
+            out_dict["intercity_transport"] = inter_transit
+
+            # Ensure all stays belong to target_city
+            stays = out_dict.get("recommended_stays")
+            if isinstance(stays, list):
+                for s in stays:
+                    if isinstance(s, dict):
+                        s["city"] = target_city
+        elif is_multi_req:
             origin_name = str(inputs.get("origin", "Origin")).strip()
             budget_val = clean_float(inputs.get("budget"), 25000.0)
-            reconcile_multi_city_itinerary(out_dict, raw_cities=raw_cities, origin_name=origin_name, budget_val=budget_val)
-        elif not is_multi:
+            reconcile_multi_city_itinerary(out_dict, raw_cities=user_city_list, origin_name=origin_name, budget_val=budget_val)
+        else:
             out_dict["cities_visited"] = None
+            if isinstance(out_dict.get("intercity_transport"), dict):
+                out_dict["intercity_transport"]["route_legs"] = []
 
         # Date processing & multi-format date parser
         raw_date = inputs.get("travel_date")
@@ -862,12 +906,17 @@ async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
     try:
         orig_job = db.get_job(job_id)
         orig_cost = 0.0
+        orig_origin = None
         if orig_job and isinstance(orig_job.get("result"), dict):
             orig_cost = float(orig_job["result"].get("total_estimated_cost", 0.0))
+            orig_origin = orig_job["result"].get("origin_city")
 
         itinerary_data = await asyncio.to_thread(_run_revision_sync, inputs)
 
         if isinstance(itinerary_data, dict):
+            if orig_origin and not itinerary_data.get("origin_city"):
+                itinerary_data["origin_city"] = orig_origin
+
             new_cost = float(itinerary_data.get("total_estimated_cost", 0.0))
             currency = itinerary_data.get("currency", "INR")
             sym = "$" if currency == "USD" else ("€" if currency == "EUR" else "₹")
@@ -1145,11 +1194,12 @@ async def get_shareable_trip(job_id: str):
         raise HTTPException(status_code=404, detail="Itinerary data is unavailable.")
 
     # Explicitly clean and ensure strictly public TripItinerary fields
-    if isinstance(result, dict) and (result.get("cities_visited") or any(isinstance(d, dict) and d.get("city") for d in result.get("days", []))):
+    if isinstance(result, dict) and result.get("cities_visited") and isinstance(result["cities_visited"], list) and len(result["cities_visited"]) > 1:
         reconcile_multi_city_itinerary(result)
 
     clean_itinerary = {
         "destination_city": result.get("destination_city"),
+        "origin_city": result.get("origin_city"),
         "cities_visited": result.get("cities_visited"),
         "destination_country": result.get("destination_country"),
         "trip_length_days": result.get("trip_length_days"),
@@ -1489,6 +1539,7 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
         "language": payload.language,
         "travel_date": payload.travel_date,
         "return_date": payload.return_date,
+        "multi_city": payload.multi_city,
     }
 
     user_email = _get_current_user_email(request)
@@ -1726,7 +1777,7 @@ async def get_job_status(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
 
     res_data = job.get("result")
-    if isinstance(res_data, dict) and (res_data.get("cities_visited") or any(isinstance(d, dict) and d.get("city") for d in res_data.get("days", []))):
+    if isinstance(res_data, dict) and res_data.get("cities_visited") and isinstance(res_data["cities_visited"], list) and len(res_data["cities_visited"]) > 1:
         reconcile_multi_city_itinerary(res_data)
 
     return JobStatusResponse(

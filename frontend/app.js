@@ -376,6 +376,9 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
+    // Auto detect multi city
+    checkMultiCityAutoDetect();
+
     showToast(`✨ Loaded preset: ${p.label}`);
   }
 
@@ -404,6 +407,12 @@ document.addEventListener('DOMContentLoaded', () => {
         budgetInput.value = Math.round(currentVal / 85);
       }
       updateBudgetDisplay();
+      if (currentItinerary) {
+        activeDisplayCurrency = newCurr;
+        const sel = document.getElementById('currency-selector');
+        if (sel) sel.value = newCurr;
+        renderItinerary(currentItinerary, currentItinerary.total_estimated_cost, newCurr);
+      }
     });
   });
 
@@ -611,6 +620,7 @@ document.addEventListener('DOMContentLoaded', () => {
         multiCityAutoHint.style.display = 'block';
       }
     } else {
+      multiCityCheckbox.checked = false;
       if (multiCityAutoHint) multiCityAutoHint.style.display = 'none';
     }
   }
@@ -773,9 +783,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const travelersInput = document.getElementById('travelersInput');
     const travelersVal = travelersInput ? (parseInt(travelersInput.value, 10) || 1) : 1;
 
+    const rawCitiesVal = citiesInput.value.trim();
+    const cityTokens = rawCitiesVal.split(',').map(c => c.trim()).filter(Boolean);
+    const isMultiCityChecked = (document.getElementById('multi_city') ? document.getElementById('multi_city').checked : false) && cityTokens.length > 1;
+
     const payload = {
       origin: originInput.value.trim(),
-      cities: citiesInput.value.trim(),
+      cities: rawCitiesVal,
       interests: interestsInput.value.trim(),
       trip_length: parseInt(daysSlider.value, 10),
       budget: parseFloat(budgetInput.value),
@@ -787,7 +801,7 @@ document.addEventListener('DOMContentLoaded', () => {
       language: languageSelect ? languageSelect.value : 'en',
       travel_date: travelDateInput ? travelDateInput.value || null : null,
       return_date: returnDateInput ? returnDateInput.value || null : null,
-      multi_city: document.getElementById('multi_city') ? document.getElementById('multi_city').checked : false,
+      multi_city: isMultiCityChecked,
     };
 
 
@@ -1155,6 +1169,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- Render Itinerary Results ---
   function renderItinerary(itinerary, userBudget, currencyCode) {
     if (!itinerary) return;
+    currentItinerary = itinerary;
+    window.renderItinerary = renderItinerary;
+    window.currentItinerary = currentItinerary;
 
     // Render Countdown Banner with Departure & Return Dates
     const tDate = itinerary.start_date || itinerary.travel_date || (currentJobData && currentJobData.travel_date);
@@ -1255,89 +1272,557 @@ document.addEventListener('DOMContentLoaded', () => {
       };
     }
 
-    // --- Render Interactive Leaflet Map ---
+    // --- Render Interactive Leaflet Map & Attraction / Stay Pins ---
     const renderMap = () => {
       const mapContainer = document.getElementById('map-container');
       if (!mapContainer || typeof L === 'undefined') return;
 
       if (window.activeTripMap) {
-        window.activeTripMap.remove();
+        try {
+          window.activeTripMap.remove();
+        } catch (e) {
+          console.warn('Error clearing existing map:', e);
+        }
         window.activeTripMap = null;
       }
 
+      // Comprehensive coordinates dictionary for Indian and global destinations
       const cityCoords = {
-        'tirupati': [13.6288, 79.4192],
+        // Andhra Pradesh & Telangana
         'vijayawada': [16.5062, 80.6480],
+        'bezawada': [16.5062, 80.6480],
+        'guntur': [16.3067, 80.4365],
+        'tirupati': [13.6288, 79.4192],
+        'tirumala': [13.6833, 79.3500],
         'nellore': [14.4426, 79.9865],
         'nellor': [14.4426, 79.9865],
-        'guntur': [16.3067, 80.4365],
         'visakhapatnam': [17.6868, 83.2185],
         'vizag': [17.6868, 83.2185],
-        'goa': [15.2993, 74.1240],
-        'north goa': [15.5494, 73.7535],
-        'south goa': [15.1500, 73.9800],
-        'old goa': [15.5033, 73.9114],
-        'panjim': [15.4909, 73.8278],
-        'gokarna': [14.5479, 74.3188],
-        'mumbai': [19.0760, 72.8777],
+        'rajahmundry': [17.0005, 81.8040],
+        'kakinada': [16.9891, 82.2475],
+        'kurnool': [15.8281, 78.0373],
+        'kadapa': [14.4673, 78.8242],
+        'hyderabad': [17.3850, 78.4867],
+        'warangal': [17.9689, 79.5941],
+        'araku': [18.3273, 82.8775],
+        'amaravati': [16.5131, 80.5165],
+        'srikalahasti': [13.7498, 79.6984],
+
+        // Karnataka
         'bengaluru': [12.9716, 77.5946],
         'bangalore': [12.9716, 77.5946],
         'mysuru': [12.2958, 76.6394],
         'mysore': [12.2958, 76.6394],
-        'hyderabad': [17.3850, 78.4867],
+        'coorg': [12.4244, 75.7382],
+        'madikeri': [12.4244, 75.7382],
+        'gokarna': [14.5479, 74.3188],
+        'hampi': [15.3350, 76.4600],
+        'chikmagalur': [13.3161, 75.7720],
+        'chikkamagaluru': [13.3161, 75.7720],
+        'mangalore': [12.9141, 74.8560],
+        'mangaluru': [12.9141, 74.8560],
+        'udupi': [13.3409, 74.7421],
+        'badami': [15.9187, 75.6766],
+
+        // Tamil Nadu & Pondicherry
         'chennai': [13.0827, 80.2707],
-        'delhi': [28.6139, 77.2090],
-        'munnar': [10.0889, 77.0595],
+        'ooty': [11.4102, 76.6950],
+        'udhagamandalam': [11.4102, 76.6950],
+        'kodaikanal': [10.2381, 77.4892],
+        'madurai': [9.9252, 78.1198],
+        'coimbatore': [11.0168, 76.9558],
+        'pondicherry': [11.9416, 79.8083],
+        'puducherry': [11.9416, 79.8083],
+        'rameswaram': [9.2876, 79.3129],
+        'kanyakumari': [8.0883, 77.5385],
+        'mahabalipuram': [12.6269, 80.1927],
+        'thanjavur': [10.7870, 79.1378],
+
+        // Kerala
         'kochi': [9.9312, 76.2673],
+        'cochin': [9.9312, 76.2673],
+        'munnar': [10.0889, 77.0595],
+        'alleppey': [9.4981, 76.3388],
+        'alappuzha': [9.4981, 76.3388],
+        'wayanad': [11.6854, 76.1320],
+        'varkala': [8.7379, 76.7163],
+        'kovalam': [8.4004, 76.9787],
+        'thekkady': [9.6031, 77.1615],
+        'thiruvananthapuram': [8.5241, 76.9366],
+        'trivandrum': [8.5241, 76.9366],
+
+        // Goa & Maharashtra
+        'goa': [15.2993, 74.1240],
+        'north goa': [15.5494, 73.7535],
+        'south goa': [15.1500, 73.9800],
+        'panaji': [15.4909, 73.8278],
+        'panjim': [15.4909, 73.8278],
+        'calangute': [15.5439, 73.7553],
+        'baga': [15.5553, 73.7517],
+        'anjuna': [15.5833, 73.7431],
+        'mumbai': [19.0760, 72.8777],
+        'pune': [18.5204, 73.8567],
+        'lonavala': [18.7557, 73.4091],
+        'mahabaleshwar': [17.9237, 73.6586],
+        'alibaug': [18.6414, 72.8722],
+        'shirdi': [19.7667, 74.4764],
+        'aurangabad': [19.8762, 75.3433],
+
+        // North & West India
+        'delhi': [28.6139, 77.2090],
+        'delhi ncr': [28.6139, 77.2090],
+        'new delhi': [28.6139, 77.2090],
         'jaipur': [26.9124, 75.7873],
         'udaipur': [24.5854, 73.7125],
+        'jodhpur': [26.2389, 73.0243],
+        'jaisalmer': [26.9157, 70.9083],
+        'pushkar': [26.4897, 74.5511],
+        'agra': [27.1767, 78.0081],
         'varanasi': [25.3176, 82.9739],
         'rishikesh': [30.0869, 78.2676],
-        'manali': [32.2432, 77.1892],
+        'haridwar': [29.9457, 78.1642],
+        'dehradun': [30.3165, 78.0322],
+        'mussoorie': [30.4598, 78.0644],
         'shimla': [31.1048, 77.1734],
-        'agra': [27.1767, 78.0081]
+        'manali': [32.2432, 77.1892],
+        'dharamshala': [32.2190, 76.3234],
+        'mcleodganj': [32.2426, 76.3213],
+        'amritsar': [31.6340, 74.8723],
+        'chandigarh': [30.7333, 76.7794],
+        'srinagar': [34.0837, 74.7973],
+        'gulmarg': [34.0484, 74.3805],
+        'leh': [34.1526, 77.5771],
+        'ladakh': [34.1526, 77.5771],
+
+        // East & North East India
+        'kolkata': [22.5726, 88.3639],
+        'darjeeling': [27.0410, 88.2663],
+        'gangtok': [27.3389, 88.6065],
+        'shillong': [25.5788, 91.8933],
+        'cherrapunji': [25.2702, 91.7323],
+        'guwahati': [26.1445, 91.7362],
+        'puri': [19.8135, 85.8312],
+        'bhubaneswar': [20.2961, 85.8245]
       };
 
-      const getCityCoords = (cStr) => {
-        if (!cStr) return [16.5062, 80.6480];
-        const lower = String(cStr).toLowerCase().trim();
+      const getCoords = (nameStr, fallback = [16.5062, 80.6480]) => {
+        if (!nameStr) return fallback;
+        const lower = String(nameStr).toLowerCase().trim();
         if (cityCoords[lower]) return cityCoords[lower];
         for (const [k, pt] of Object.entries(cityCoords)) {
           if (lower.includes(k) || k.includes(lower)) return pt;
         }
-        return [16.5062, 80.6480];
+        return fallback;
       };
 
-      let baseCity = (city || 'vijayawada').toLowerCase().trim();
-      let coords = getCityCoords(baseCity);
+      const originHubName = (itinerary && (itinerary.origin_city || (itinerary.route_analysis && itinerary.route_analysis.start_hub)))
+        || (currentJobData && currentJobData.origin)
+        || (originInput && originInput.value.trim())
+        || 'Origin';
+      if (originInput && itinerary && itinerary.origin_city) {
+        originInput.value = itinerary.origin_city;
+      }
+      const mainCityName = itinerary.destination_city || city || 'Vijayawada';
+      const baseCoords = getCoords(mainCityName);
 
-      const map = L.map('map-container').setView(coords, 10);
+      // Initialize map with custom controls
+      const map = L.map('map-container', {
+        zoomControl: true,
+        scrollWheelZoom: false
+      }).setView(baseCoords, 10);
       window.activeTripMap = map;
 
+      // Dark / modern OpenStreetMap tile layer
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
         maxZoom: 18
       }).addTo(map);
 
-      const routeLatLngs = [];
+      // Arrays for bounds, filters, and interactive day triggers
+      const allMarkers = [];
+      const dayMarkers = {};
+      const polylinePoints = [];
 
-      const citiesList = itinerary.cities_visited || [city];
-      citiesList.forEach((cName, idx) => {
-        const cPos = getCityCoords(cName);
-        routeLatLngs.push(cPos);
+      // 1. Plot Departure Hub (Origin)
+      const originCoords = getCoords(originHubName, [12.9716, 77.5946]);
+      const hubIcon = L.divIcon({
+        className: '',
+        html: `<div class="custom-map-pin pin-hub pin-pulse" style="width: 36px; height: 36px; font-size: 16px;">🛫</div>`,
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
+        popupAnchor: [0, -18]
+      });
+      const hubMarker = L.marker(originCoords, { icon: hubIcon }).addTo(map)
+        .bindPopup(`
+          <div class="map-popup-header">
+            <span class="map-popup-title">🛫 Departure Hub</span>
+            <span class="map-popup-badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8;">Origin</span>
+          </div>
+          <div class="map-popup-body">
+            <strong>${escapeHtml(originHubName)}</strong><br>
+            Trip starting point & inter-city departure hub.
+          </div>
+          <a class="map-popup-btn" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(originHubName)}" target="_blank" rel="noopener">Directions in Maps ↗</a>
+        `);
+      allMarkers.push(hubMarker);
+      polylinePoints.push(originCoords);
 
-        L.marker(cPos).addTo(map)
-          .bindPopup(`<b>📍 ${escapeHtml(cName)}</b><br>Destination Stop ${idx + 1} on your itinerary`)
-          .openPopup();
+      // 2. Plot Visited Cities / Sequential Stops
+      const visitedCities = (itinerary.cities_visited && itinerary.cities_visited.length > 0)
+        ? itinerary.cities_visited
+        : [mainCityName];
+
+      visitedCities.forEach((cName) => {
+        const cCoords = getCoords(cName, baseCoords);
+        polylinePoints.push(cCoords);
       });
 
-      if (routeLatLngs.length > 1) {
-        const polyline = L.polyline(routeLatLngs, { color: '#38bdf8', weight: 4, opacity: 0.85, dashArray: '8, 8' }).addTo(map);
-        map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
+      // 3. Plot Recommended Stays
+      const staysToPlot = (itinerary.recommended_stays && Array.isArray(itinerary.recommended_stays) && itinerary.recommended_stays.length > 0)
+        ? itinerary.recommended_stays
+        : (itinerary.recommended_stay ? [itinerary.recommended_stay] : []);
+
+      staysToPlot.forEach((stay, sIdx) => {
+        const stayCity = stay.city || mainCityName;
+        const stayCityCoord = getCoords(stayCity, baseCoords);
+        // Offset slightly if multiple pins in same city
+        const stayCoord = [stayCityCoord[0] + 0.007 * (sIdx + 1), stayCityCoord[1] + 0.007 * (sIdx + 1)];
+        const stayIcon = L.divIcon({
+          className: '',
+          html: `<div class="custom-map-pin pin-stay" style="width: 34px; height: 34px; font-size: 15px;" title="Hotel: ${escapeHtml(stay.name || 'Stay')}">🏨</div>`,
+          iconSize: [34, 34],
+          iconAnchor: [17, 17],
+          popupAnchor: [0, -17]
+        });
+
+        const stayMarker = L.marker(stayCoord, { icon: stayIcon }).addTo(map)
+          .bindPopup(`
+            <div class="map-popup-header">
+              <span class="map-popup-title">🏨 ${escapeHtml(stay.name || 'Recommended Stay')}</span>
+              <span class="map-popup-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399;">${escapeHtml(stay.category || 'Hotel')}</span>
+            </div>
+            <div class="map-popup-body">
+              📍 <strong>${escapeHtml(stay.address_or_area || stayCity)}</strong><br>
+              💰 ${formatMoney(stay.estimated_price_per_night || 800, activeCurrency)} / night<br>
+              ${escapeHtml(stay.why_recommended || 'Budget-matched accommodation.')}
+            </div>
+            <a class="map-popup-btn" href="https://www.google.com/travel/hotels?q=${encodeURIComponent((stay.name || 'Hotel') + ' ' + stayCity)}" target="_blank" rel="noopener">Check Rates & Stays ↗</a>
+          `);
+        allMarkers.push(stayMarker);
+      });
+
+      // 4. Plot Day-by-Day Stops & Activities
+      const itineraryDays = itinerary.days || [];
+      itineraryDays.forEach((day, dIdx) => {
+        const dayNum = day.day_number || dIdx + 1;
+        const dayCity = day.city || mainCityName;
+        const cityPt = getCoords(dayCity, baseCoords);
+        // Minor scatter for day stops around the city center
+        const angle = (dIdx * (2 * Math.PI / Math.max(1, itineraryDays.length)));
+        const radius = 0.015;
+        const dayCoord = [cityPt[0] + Math.sin(angle) * radius, cityPt[1] + Math.cos(angle) * radius];
+
+        const dayIcon = L.divIcon({
+          className: '',
+          html: `<div class="custom-map-pin pin-day" style="width: 32px; height: 32px; font-size: 13px;" title="Day ${dayNum}: ${escapeHtml(day.theme || 'Exploration')}">${dayNum}</div>`,
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+          popupAnchor: [0, -16]
+        });
+
+        const dayMarker = L.marker(dayCoord, { icon: dayIcon }).addTo(map)
+          .bindPopup(`
+            <div class="map-popup-header">
+              <span class="map-popup-title">Day ${dayNum}: ${escapeHtml(day.theme || 'Day Exploration')}</span>
+              <span class="map-popup-badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc;">📍 ${escapeHtml(dayCity)}</span>
+            </div>
+            <div class="map-popup-body">
+              ${day.morning ? `🌅 <strong>Morning:</strong> ${escapeHtml(day.morning.slice(0, 110))}...<br>` : ''}
+              ${day.afternoon ? `☀️ <strong>Afternoon:</strong> ${escapeHtml(day.afternoon.slice(0, 110))}...<br>` : ''}
+              💰 <strong>Est. Daily Cost:</strong> ${formatMoney(day.estimated_cost || 0, activeCurrency)}
+            </div>
+            <a class="map-popup-btn" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((day.theme || '') + ' ' + dayCity)}" target="_blank" rel="noopener">Explore in Google Maps ↗</a>
+          `);
+
+        allMarkers.push(dayMarker);
+        dayMarkers[dayNum] = dayMarker;
+      });
+
+      // 5. Draw Connecting Route Polyline
+      let routePolyline = null;
+      if (polylinePoints.length > 1) {
+        routePolyline = L.polyline(polylinePoints, {
+          color: '#38bdf8',
+          weight: 4,
+          opacity: 0.85,
+          dashArray: '8, 8'
+        }).addTo(map);
+      }
+
+      // Initial fit to show all stops
+      const groupBounds = L.featureGroup(allMarkers).getBounds();
+      if (groupBounds.isValid()) {
+        map.fitBounds(groupBounds, { padding: [50, 50], maxZoom: 13 });
+      }
+
+      // 6. Wire Interactive Map Controls Bar
+      const btnAll = document.getElementById('btn-map-all');
+      const btnRoute = document.getElementById('btn-map-route');
+      const btnReset = document.getElementById('btn-map-reset');
+      const dayPillsContainer = document.getElementById('map-day-pills');
+
+      if (btnAll) {
+        btnAll.onclick = () => {
+          document.querySelectorAll('.map-filter-btn').forEach(b => b.classList.remove('active'));
+          btnAll.classList.add('active');
+          if (groupBounds.isValid()) map.fitBounds(groupBounds, { padding: [50, 50], maxZoom: 13 });
+        };
+      }
+
+      if (btnReset) {
+        btnReset.onclick = () => {
+          if (groupBounds.isValid()) map.fitBounds(groupBounds, { padding: [50, 50], maxZoom: 13 });
+        };
+      }
+
+      if (btnRoute) {
+        let routeVisible = true;
+        btnRoute.onclick = () => {
+          if (!routePolyline) return;
+          routeVisible = !routeVisible;
+          if (routeVisible) {
+            map.addLayer(routePolyline);
+            btnRoute.classList.add('active');
+          } else {
+            map.removeLayer(routePolyline);
+            btnRoute.classList.remove('active');
+          }
+        };
+      }
+
+      // Populate Day Pills in Map Toolbar
+      if (dayPillsContainer) {
+        dayPillsContainer.innerHTML = '';
+        itineraryDays.forEach((day, dIdx) => {
+          const dNum = day.day_number || dIdx + 1;
+          const dayBtn = document.createElement('button');
+          dayBtn.type = 'button';
+          dayBtn.className = 'map-filter-btn';
+          dayBtn.innerHTML = `<span>📍</span> Day ${dNum}`;
+          dayBtn.onclick = () => {
+            document.querySelectorAll('.map-filter-btn').forEach(b => b.classList.remove('active'));
+            dayBtn.classList.add('active');
+            const targetMarker = dayMarkers[dNum];
+            if (targetMarker) {
+              map.setView(targetMarker.getLatLng(), 14, { animate: true });
+              targetMarker.openPopup();
+            }
+          };
+          dayPillsContainer.appendChild(dayBtn);
+        });
+      }
+
+      // Expose helper to focus day from timeline
+      window.focusMapOnDay = (dNum) => {
+        const card = document.getElementById('itinerary-map-card');
+        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const targetMarker = dayMarkers[dNum];
+        if (targetMarker && map) {
+          setTimeout(() => {
+            map.setView(targetMarker.getLatLng(), 14, { animate: true });
+            targetMarker.openPopup();
+          }, 350);
+        }
+      };
+    };
+
+    // --- Render Visual Budget Donut Chart (Chart.js) ---
+    const renderBudgetChart = () => {
+      const canvas = document.getElementById('budget-donut-chart');
+      const legendContainer = document.getElementById('budget-legend-container');
+      const centerTotalEl = document.getElementById('donut-center-total');
+      if (!canvas || typeof Chart === 'undefined') return;
+
+      if (window.activeBudgetChart) {
+        try {
+          window.activeBudgetChart.destroy();
+        } catch (e) {
+          console.warn('Error destroying chart:', e);
+        }
+        window.activeBudgetChart = null;
+      }
+
+      const totalCost = itinerary.total_estimated_cost || userBudget || 5000;
+      if (centerTotalEl) {
+        centerTotalEl.textContent = formatMoney(totalCost, activeCurrency);
+      }
+
+      // 5 Expense Buckets:
+      // 1. Stays & Accommodation (#38bdf8)
+      // 2. Food & Regional Dining (#f59e0b)
+      // 3. Transit & Local Commute (#10b981)
+      // 4. Activities & Sightseeing (#a855f7)
+      // 5. Contingency & Buffer (#ec4899)
+      let stayTotal = 0;
+      let foodTotal = 0;
+      let transitTotal = 0;
+      let activitiesTotal = 0;
+      let contingencyTotal = 0;
+
+      let hasItemizedData = false;
+      const days = itinerary.days || [];
+      days.forEach(d => {
+        const breakdown = d.cost_breakdown || [];
+        if (breakdown.length > 0) {
+          hasItemizedData = true;
+          breakdown.forEach(item => {
+            const name = String(item.item || item.name || '').toLowerCase();
+            const amt = Number(item.amount) || 0;
+            if (/stay|hotel|hostel|room|resort|homestay|lodge|accommodation/i.test(name)) {
+              stayTotal += amt;
+            } else if (/food|dining|lunch|dinner|breakfast|snack|tea|coffee|chai|meals|curry|thali|restaurant|cafe/i.test(name)) {
+              foodTotal += amt;
+            } else if (/transit|bus|train|cab|taxi|auto|flight|fare|metro|commute|ride|petrol|fuel|ticket train/i.test(name)) {
+              transitTotal += amt;
+            } else if (/ticket|entry|sight|monument|guide|boat|safari|show|museum|tour|temple darshan|entry fee/i.test(name)) {
+              activitiesTotal += amt;
+            } else {
+              contingencyTotal += amt;
+            }
+          });
+        }
+      });
+
+      // Check intercity transport
+      if (itinerary.intercity_transport && itinerary.intercity_transport.estimated_cost_per_person) {
+        const travelers = parseInt(document.getElementById('travelersInput')?.value || '1', 10) || 1;
+        const legCost = itinerary.intercity_transport.estimated_cost_per_person * travelers;
+        if (transitTotal === 0) transitTotal += legCost;
+      }
+
+      // Proportional fallback if no breakdown was itemized
+      if (!hasItemizedData || (stayTotal + foodTotal + transitTotal + activitiesTotal) < 100) {
+        const tripDays = itinerary.trip_length_days || days.length || 3;
+        const recPricePerNight = (itinerary.recommended_stay && itinerary.recommended_stay.estimated_price_per_night)
+          ? itinerary.recommended_stay.estimated_price_per_night
+          : Math.round((totalCost * 0.35) / Math.max(1, tripDays));
+
+        stayTotal = Math.min(Math.round(totalCost * 0.42), recPricePerNight * tripDays);
+        foodTotal = Math.round(totalCost * 0.25);
+        transitTotal = Math.round(totalCost * 0.18);
+        activitiesTotal = Math.round(totalCost * 0.10);
+        contingencyTotal = Math.max(Math.round(totalCost * 0.05), totalCost - (stayTotal + foodTotal + transitTotal + activitiesTotal));
+      }
+
+      const computedSum = stayTotal + foodTotal + transitTotal + activitiesTotal + contingencyTotal;
+      if (computedSum < totalCost) {
+        contingencyTotal += (totalCost - computedSum);
+      }
+
+      const categories = [
+        { key: 'stays', name: 'Stays & Accommodation', color: '#38bdf8', amount: stayTotal, icon: '🏨' },
+        { key: 'food', name: 'Food & Regional Dining', color: '#f59e0b', amount: foodTotal, icon: '🍲' },
+        { key: 'transit', name: 'Transit & Local Commute', color: '#10b981', amount: transitTotal, icon: '🚆' },
+        { key: 'activities', name: 'Activities & Sightseeing', color: '#a855f7', amount: activitiesTotal, icon: '🏛️' },
+        { key: 'contingency', name: 'Contingency & Buffer', color: '#ec4899', amount: contingencyTotal, icon: '🛡️' }
+      ];
+
+      const dataValues = categories.map(c => c.amount);
+      const bgColors = categories.map(c => c.color);
+      const labels = categories.map(c => c.name);
+      const grandTotal = dataValues.reduce((a, b) => a + b, 0) || 1;
+
+      // Initialize Chart.js Doughnut
+      const ctx = canvas.getContext('2d');
+      const chart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: dataValues,
+            backgroundColor: bgColors,
+            borderColor: '#0f172a',
+            borderWidth: 3,
+            hoverBorderColor: '#ffffff',
+            hoverOffset: 8
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '72%',
+          animation: {
+            animateScale: true,
+            animateRotate: true,
+            duration: 800
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+              titleColor: '#38bdf8',
+              bodyColor: '#f8fafc',
+              borderColor: 'rgba(56, 189, 248, 0.4)',
+              borderWidth: 1,
+              padding: 12,
+              boxPadding: 6,
+              usePointStyle: true,
+              callbacks: {
+                label: function(context) {
+                  const val = context.raw || 0;
+                  const pct = Math.round((val / grandTotal) * 100);
+                  return ` ${context.label}: ${formatMoney(val, activeCurrency)} (${pct}%)`;
+                }
+              }
+            }
+          }
+        }
+      });
+
+      window.activeBudgetChart = chart;
+
+      // Render Custom Interactive Legend
+      if (legendContainer) {
+        legendContainer.innerHTML = '';
+        categories.forEach((cat, idx) => {
+          const pct = Math.round((cat.amount / grandTotal) * 100);
+          const item = document.createElement('div');
+          item.className = 'budget-legend-item';
+          item.innerHTML = `
+            <div class="legend-meta-left">
+              <div class="legend-color-dot" style="background: ${cat.color}; color: ${cat.color};"></div>
+              <div class="legend-info">
+                <div class="legend-category-title">${cat.icon} ${escapeHtml(cat.name)}</div>
+                <div class="legend-progress-bar">
+                  <div class="legend-progress-fill" style="width: ${pct}%; background: ${cat.color};"></div>
+                </div>
+              </div>
+            </div>
+            <div class="legend-meta-right">
+              <div class="legend-amount">${formatMoney(cat.amount, activeCurrency)}</div>
+              <div class="legend-pct">${pct}% of budget</div>
+            </div>
+          `;
+
+          // Interactive highlight link to chart segment
+          item.onmouseenter = () => {
+            chart.setActiveElements([{ datasetIndex: 0, index: idx }]);
+            chart.tooltip.setActiveElements([{ datasetIndex: 0, index: idx }], { x: 0, y: 0 });
+            chart.update();
+          };
+          item.onmouseleave = () => {
+            chart.setActiveElements([]);
+            chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+            chart.update();
+          };
+
+          legendContainer.appendChild(item);
+        });
       }
     };
 
     setTimeout(renderMap, 300);
+    setTimeout(renderBudgetChart, 350);
 
     // Render Smart Geographic Route Corridor & Distance Breakdown
     function renderRouteCorridor(routeAnalysis, originCity) {
@@ -1424,23 +1909,29 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    renderRouteCorridor(itinerary.route_analysis, (currentJobData && currentJobData.origin) || originInput.value.trim());
+    renderRouteCorridor(itinerary.route_analysis, (itinerary && (itinerary.origin_city || (itinerary.route_analysis && itinerary.route_analysis.start_hub))) || (currentJobData && currentJobData.origin) || originInput.value.trim());
 
     // Render Inter-City Transit Recommendation Card (Multi-Leg & Single-Leg Support)
     const intercityCard = document.getElementById('intercity-transit-card');
 
     if (intercityCard) {
       const it = itinerary.intercity_transport;
-      const legs = (it && it.route_legs && Array.isArray(it.route_legs) && it.route_legs.length > 0) ? it.route_legs : null;
+      const legs = (it && it.route_legs && Array.isArray(it.route_legs) && it.route_legs.length > 1) ? it.route_legs : null;
 
-      if (legs && legs.length > 0) {
-        const titleEl = intercityCard.querySelector('h3');
-        if (titleEl) titleEl.textContent = `🚀 Inter-City Travel & Route Guide (${legs.length} Sequential Journey Legs)`;
-        const originName = (currentJobData && currentJobData.origin) ? currentJobData.origin : 'Origin';
-        const routeText = document.getElementById('intercity-route-text');
-        if (routeText) routeText.textContent = `(${originName} ➔ ${(itinerary.cities_visited || [city]).join(' ➔ ')})`;
+      if (legs && legs.length > 1) {
+        const originName = (itinerary && (itinerary.origin_city || (itinerary.route_analysis && itinerary.route_analysis.start_hub))) || (currentJobData && currentJobData.origin) || (originInput.value.trim() || 'Origin');
+        const visitedCities = (itinerary.cities_visited && itinerary.cities_visited.length > 0) ? itinerary.cities_visited : [city];
+        const routeHeader = `${escapeHtml(originName)} ➔ ${visitedCities.map(escapeHtml).join(' ➔ ')}`;
 
         let multiHTML = `
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 10px; font-weight: 700; color: #38bdf8; font-size: 1.15rem;">
+              <span>🚀</span> Inter-City Travel & Route Guide <span style="color: #94a3b8; font-size: 0.95rem; font-weight: 500;">(${routeHeader})</span>
+            </div>
+            <span class="badge-stay-tier" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid #38bdf8;">
+              ${legs.length} Sequential Journey Legs
+            </span>
+          </div>
           <div style="font-size: 0.88rem; color: #94a3b8; margin-bottom: 14px;">
             ✨ Recommended sequential transit connections for every destination stop in your itinerary:
           </div>
@@ -1480,31 +1971,11 @@ document.addEventListener('DOMContentLoaded', () => {
             `).join('')}
           </div>
         `;
-
-        // Update body or container
-        const optionText = document.getElementById('intercity-option-text');
-        if (optionText) {
-          const parentGrid = optionText.closest('.metric-card-body') || intercityCard;
-          parentGrid.innerHTML = multiHTML;
-        } else {
-          intercityCard.innerHTML = `
-            <div class="metric-card-header">
-              <h3 style="margin: 0; font-size: 1.1rem; color: #f8fafc;">🚀 Inter-City Travel & Route Guide (${legs.length} Sequential Journey Legs)</h3>
-            </div>
-            <div style="padding: 16px;">${multiHTML}</div>
-          `;
-        }
+        intercityCard.innerHTML = multiHTML;
         intercityCard.style.display = 'block';
       } else if (it && (it.recommended_option || it.mode)) {
-        const originName = (currentJobData && currentJobData.origin) ? currentJobData.origin : '';
-        const routeText = document.getElementById('intercity-route-text');
-        const modeBadge = document.getElementById('intercity-mode-badge');
-        const optionText = document.getElementById('intercity-option-text');
-        const costText = document.getElementById('intercity-cost-text');
-        const durationText = document.getElementById('intercity-duration-text');
-        const whyText = document.getElementById('intercity-why-text');
-        const connectText = document.getElementById('intercity-connect-text');
-
+        const originName = (itinerary && (itinerary.origin_city || (itinerary.route_analysis && itinerary.route_analysis.start_hub))) || (currentJobData && currentJobData.origin) || (originInput.value.trim() || 'Origin');
+        const targetCity = city || (itinerary.destination_city || 'Destination');
         let actualMode = (it.mode || 'Transit').trim();
         if (it.recommended_option && /flight|indigo|air india|akasa|spicejet/i.test(it.recommended_option)) {
           actualMode = 'Flight';
@@ -1514,15 +1985,53 @@ document.addEventListener('DOMContentLoaded', () => {
           actualMode = 'Bus';
         }
         const modeIcon = actualMode.toLowerCase() === 'flight' ? '✈️' : (actualMode.toLowerCase() === 'bus' ? '🚌' : '🚆');
+        const estFare = it.estimated_cost_per_person ? `${formatMoney(it.estimated_cost_per_person, activeCurrency)} / person` : '₹150 - ₹450 / person';
+        const estDuration = (it.travel_duration && !it.travel_duration.includes('N/A')) ? it.travel_duration : 'Direct route';
+        const recOption = it.recommended_option || `Direct Express Bus / Train (${originName} to ${targetCity})`;
+        const whyRec = it.why_recommended || `Direct, convenient transit connecting ${originName} directly to ${targetCity}.`;
+        const localTips = it.local_connect_tips || `Prepaid autos and app-based cabs available at ${targetCity} arrival terminal.`;
 
-        if (routeText) routeText.textContent = originName ? `(${originName} ➔ ${city})` : `(to ${city})`;
-        if (modeBadge) modeBadge.textContent = `${modeIcon} ${actualMode} Recommended`;
-        if (optionText) optionText.textContent = it.recommended_option || 'Direct Route Options';
-        if (costText) costText.textContent = it.estimated_cost_per_person ? formatMoney(it.estimated_cost_per_person, activeCurrency) + " / person" : 'Varies by class';
-        if (durationText) durationText.textContent = it.travel_duration || 'Standard Transit Time';
-        if (whyText) whyText.innerHTML = `<strong>Why Recommended:</strong> ${escapeHtml(it.why_recommended || '')}`;
-        if (connectText) connectText.innerHTML = `<strong>🚏 Arrival & Hotel Connection:</strong> ${escapeHtml(it.local_connect_tips || 'Take local app-cab or station prepaid auto to your accommodation.')}`;
-
+        intercityCard.innerHTML = `
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 10px; font-weight: 700; color: #38bdf8; font-size: 1.15rem;">
+              <span>🚀</span> Inter-City Travel & Route Guide <span style="color: #94a3b8; font-size: 0.95rem; font-weight: 500;">(${escapeHtml(originName)} ➔ ${escapeHtml(targetCity)})</span>
+            </div>
+            <span class="badge-stay-tier" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid #38bdf8;">
+              ${modeIcon} ${escapeHtml(actualMode)} Recommended
+            </span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 14px;">
+            <div style="background: rgba(255,255,255,0.04); padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">
+              <div style="font-size: 0.78rem; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Recommended Transit</div>
+              <div style="font-size: 0.98rem; font-weight: 700; color: #f8fafc; margin-top: 4px;">${escapeHtml(recOption)}</div>
+            </div>
+            <div style="background: rgba(255,255,255,0.04); padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">
+              <div style="font-size: 0.78rem; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Estimated Fare</div>
+              <div style="font-size: 1.1rem; font-weight: 800; color: #34d399; margin-top: 4px;">${escapeHtml(estFare)}</div>
+            </div>
+            <div style="background: rgba(255,255,255,0.04); padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">
+              <div style="font-size: 0.78rem; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Travel Duration</div>
+              <div style="font-size: 0.98rem; font-weight: 700; color: #f8fafc; margin-top: 4px;">${escapeHtml(estDuration)}</div>
+            </div>
+          </div>
+          <div style="font-size: 0.88rem; color: #cbd5e1; line-height: 1.5; margin-bottom: 10px;">
+            <strong>Why Recommended:</strong> ${escapeHtml(whyRec)}
+          </div>
+          <div style="background: rgba(56, 189, 248, 0.1); border-left: 3px solid #38bdf8; padding: 10px 14px; border-radius: 4px; font-size: 0.85rem; color: #bae6fd; margin-bottom: 12px;">
+            <strong>🚏 Arrival & Hotel Connection:</strong> ${escapeHtml(localTips)}
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;">
+            <a href="https://www.confirmtkt.com/rbooking-d/trains/from/${encodeURIComponent(originName)}/to/${encodeURIComponent(targetCity)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.12); padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.3);">
+              <span>🚆 Check Trains (ConfirmTkt) ↗</span>
+            </a>
+            <a href="https://www.redbus.in/bus-tickets/${encodeURIComponent(originName)}-to-${encodeURIComponent(targetCity)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem; color: #f87171; text-decoration: none; background: rgba(239, 68, 68, 0.12); padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(239, 68, 68, 0.3);">
+              <span>🚌 Check Buses (RedBus) ↗</span>
+            </a>
+            <a href="https://www.google.com/travel/flights?q=flights%20from%20${encodeURIComponent(originName)}%20to%20${encodeURIComponent(targetCity)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem; color: #a78bfa; text-decoration: none; background: rgba(168, 85, 247, 0.12); padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(168, 85, 247, 0.3);">
+              <span>✈️ Compare Flights ↗</span>
+            </a>
+          </div>
+        `;
         intercityCard.style.display = 'block';
       } else {
         intercityCard.style.display = 'none';
@@ -1647,6 +2156,9 @@ document.addEventListener('DOMContentLoaded', () => {
             ${displayCity ? `<span class="day-city-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 6px;">📍 ${escapeHtml(displayCity)}</span>` : ''}
           </div>
           <div class="day-meta">
+            <button type="button" class="btn-map-pin-focus" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8; font-size: 0.74rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" onclick="event.stopPropagation(); focusMapOnDay(${dayNum})" title="Focus Day ${dayNum} on Map">
+              <span>🗺️ Pin</span>
+            </button>
             ${costTagHtml}
             <span class="chevron-icon">▼</span>
           </div>
@@ -1986,14 +2498,44 @@ document.addEventListener('DOMContentLoaded', () => {
     const recStays = itinerary.recommended_stays;
     const recStay = itinerary.recommended_stay;
 
+    const renderHotelBookingButtons = (hotelName, cityName) => {
+      const hName = hotelName || 'Hotel';
+      const cName = cityName || city || 'India';
+      const query = `${hName} ${cName}`.trim();
+      const checkin = itinerary.start_date || itinerary.travel_date || (new Date(Date.now() + 86400000)).toISOString().split('T')[0];
+      const tripDays = itinerary.trip_length_days || (itinerary.days ? itinerary.days.length : 3);
+      const checkout = itinerary.end_date || (new Date(Date.parse(checkin) + tripDays * 86400000)).toISOString().split('T')[0];
+      const guests = parseInt(document.getElementById('travelersInput')?.value || '1', 10) || 1;
+
+      const bdcUrl = `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(query)}&checkin=${checkin}&checkout=${checkout}&group_adults=${guests}&no_rooms=1`;
+      const mmtUrl = `https://www.makemytrip.com/hotels/hotel-listing/?city=${encodeURIComponent(cName)}&checkin=${checkin}&checkout=${checkout}&roomStayQualifier=${guests}e0e`;
+      const gglUrl = `https://www.google.com/travel/hotels?q=${encodeURIComponent(query)}&dates=${checkin}_${checkout}`;
+
+      return `
+        <div class="hotel-booking-actions">
+          <a href="${bdcUrl}" target="_blank" rel="noopener noreferrer" class="btn-booking-provider btn-booking-com" title="Book ${escapeHtml(hName)} on Booking.com">
+            <span>🏨</span> Booking.com ↗
+          </a>
+          <a href="${mmtUrl}" target="_blank" rel="noopener noreferrer" class="btn-booking-provider btn-booking-mmt" title="Book hotels in ${escapeHtml(cName)} on MakeMyTrip">
+            <span>🇮🇳</span> MakeMyTrip ↗
+          </a>
+          <a href="${gglUrl}" target="_blank" rel="noopener noreferrer" class="btn-booking-provider btn-booking-google" title="Compare ${escapeHtml(hName)} on Google Hotels">
+            <span>🌐</span> Google Hotels ↗
+          </a>
+        </div>
+      `;
+    };
+
     if (stayCard) {
       const stayBody = stayCard.querySelector('.stay-card-body');
+      const stayBookingActions = document.getElementById('stay-booking-actions');
+
       if (recStays && Array.isArray(recStays) && recStays.length > 1) {
         const titleEl = stayCard.querySelector('h3');
         if (titleEl) titleEl.textContent = 'Recommended Accommodation (Multi-City Stays for All Destinations)';
         if (stayBody) {
           stayBody.innerHTML = `
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px;">
               ${recStays.map(s => `
                 <div style="background: rgba(15, 23, 42, 0.6); padding: 16px; border-radius: 10px; border: 1px solid rgba(56, 189, 248, 0.3);">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -2002,8 +2544,8 @@ document.addEventListener('DOMContentLoaded', () => {
                   </div>
                   <h4 style="font-size: 1.02rem; font-weight: 700; color: #f8fafc; margin: 6px 0 4px 0;">${escapeHtml(s.name)}</h4>
                   <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 6px;">${escapeHtml(s.address_or_area || 'Central Hub')}</div>
-                  <p style="font-size: 0.82rem; color: #cbd5e1; margin: 0 0 8px 0; line-height: 1.4;">${escapeHtml(s.why_recommended || 'Comfortable budget accommodation.')}</p>
-                  <a href="https://www.google.com/travel/hotels?q=${encodeURIComponent((s.name || 'Hotel') + ' ' + (s.city || city))}" target="_blank" rel="noopener noreferrer" style="display:inline-block; font-size:0.75rem; color:#38bdf8; text-decoration:none; background:rgba(56,189,248,0.1); padding:4px 10px; border-radius:6px; border:1px solid rgba(56,189,248,0.25);">🏨 Check Rates & Availability ↗</a>
+                  <p style="font-size: 0.82rem; color: #cbd5e1; margin: 0 0 10px 0; line-height: 1.4;">${escapeHtml(s.why_recommended || 'Comfortable budget accommodation.')}</p>
+                  ${renderHotelBookingButtons(s.name, s.city || city)}
                 </div>
               `).join('')}
             </div>
@@ -2016,6 +2558,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (stayPriceText) stayPriceText.textContent = `${formatMoney(recStay.estimated_price_per_night || (userBudget * 0.25 / (itinerary.trip_length_days || 1)), activeCurrency)} / night`;
         if (stayAreaText) stayAreaText.textContent = `📍 ${recStay.address_or_area || (city + ' Central')}`;
         if (stayWhyText) stayWhyText.textContent = recStay.why_recommended || `Matches your budget tier perfectly while keeping you accessible to main sights.`;
+        if (stayBookingActions) stayBookingActions.innerHTML = renderHotelBookingButtons(recStay.name, city);
         if (stayCard) stayCard.classList.remove('hidden');
       } else {
         let fallbackCat = userBudget <= 5000 ? 'Budget Hostel / Homestay' : (userBudget <= 25000 ? 'Comfort 3-Star Hotel' : 'Luxury 5-Star Hotel');
@@ -2025,6 +2568,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (stayPriceText) stayPriceText.textContent = `${formatMoney(approxStayPrice, activeCurrency)} / night`;
         if (stayAreaText) stayAreaText.textContent = `📍 ${city} Prime Area`;
         if (stayWhyText) stayWhyText.textContent = `Carefully selected stay matched to your overall budget of ${formatMoney(userBudget, activeCurrency)}.`;
+        if (stayBookingActions) stayBookingActions.innerHTML = renderHotelBookingButtons(`${city} Recommended ${fallbackCat}`, city);
         if (stayCard) stayCard.classList.remove('hidden');
       }
     }
@@ -2157,6 +2701,7 @@ document.addEventListener('DOMContentLoaded', () => {
     resultsSection.classList.add('active');
     resultsSection.scrollIntoView({ behavior: 'smooth' });
   }
+  window.renderItinerary = renderItinerary;
 
   // --- Export Actions ---
   const btnShareLink = document.getElementById('btn-copy-share-link');

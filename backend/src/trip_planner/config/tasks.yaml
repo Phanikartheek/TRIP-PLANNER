@@ -2,9 +2,9 @@ select_city_task:
   description: >-
     Evaluate destinations from: {cities}. Traveler is departing from {origin} for a {trip_length}-day trip with interests in {interests} and budget of {budget}.
     Search web for weather/seasonal conditions and typical daily costs.
-    CRITICAL MULTI-DESTINATION RULE: If {cities} contains multiple cities (e.g., comma-separated like "Goa, Gokarna, Munnar"), the user explicitly wants to visit ALL of these destinations in this single trip. You MUST sequence ALL listed cities into a geographically sensible, ordered route. Set `city` to the FIRST city on the route and `cities_visited` to the complete ordered list of ALL requested cities. Do NOT drop or filter out any of the user's requested cities. Only set `cities_visited` to null if exactly one city was provided.
+    CRITICAL SINGLE VS MULTI-DESTINATION RULE: If {cities} contains exactly ONE destination (e.g. "Vijayawada"), this is strictly a single-destination trip. Set `city` to that exact city and set `cities_visited` to null. Do NOT add, invent, or suggest any other cities. ONLY if {cities} explicitly contains multiple comma-separated cities (e.g. "Goa, Gokarna, Munnar") does the user want to visit multiple destinations; in that case, sequence ALL listed cities into an ordered route, set `city` to the first city, and `cities_visited` to the ordered list of all requested cities.
   expected_output: >-
-    Destination recommendation with country, justification, best time to visit, currency code, estimated daily budget, and `cities_visited` containing the complete ordered list of all requested cities.
+    Destination recommendation with country, justification, best time to visit, currency code, estimated daily budget, and `cities_visited` containing the complete ordered list of all requested cities (or null for single city).
   agent: city_selector
 
 gather_city_info_task:
@@ -24,7 +24,7 @@ plan_itinerary_task:
   description: >-
     Build a day-by-day itinerary for the {trip_length}-day trip. Each day needs a theme, morning/afternoon/evening plan (<80 words per slot).
     Specify real iconic spots by name. For EACH day, provide itemized line-item `cost_breakdown` summing to `estimated_cost`. No generic catch-all filler line items.
-    CRITICAL MULTI-CITY ROUTE ALLOCATION: If multiple cities are in {cities} or `cities_visited`, you MUST create a multi-city itinerary that visits ALL requested cities across the {trip_length} days. Allocate days logically to each city (e.g., for 5 days across Goa, Gokarna, Munnar: Day 1-2 in Goa, Day 3 in Gokarna, Day 4-5 in Munnar). Set the `city` field on EVERY day object to the EXACT city being visited on that day — the `city` field MUST match the location described in that day's theme and activities (e.g. if the day visits Vijayawada, `city` MUST be "Vijayawada", NOT another city). GEOGRAPHIC CORRIDOR SEQUENCING: Sequence multi-city visits starting from {origin} in strict order of geographic proximity (nearest adjacent cities first, moving progressively outward to distant destinations). NEVER backtrack or zig-zag across regions (e.g. starting from Vijayawada, visit adjacent Guntur first before heading to Nellore and Tirupati). When transitioning between cities, include inter-city transit details in the plan. Every city in {cities} MUST be visited and appear in the schedule!
+    CRITICAL DESTINATION SCOPE RULE: If {cities} contains only ONE destination city (e.g. "Vijayawada"), ALL {trip_length} days must be spent entirely in that single city. Set the `city` field on EVERY day object to that single city. Do NOT add, invent, or travel to any other cities. ONLY if multiple cities were explicitly requested in {cities} or `cities_visited`, create a multi-city route visiting the requested cities in geographic proximity order (e.g. starting from Delhi to Jaipur and Udaipur, visit adjacent Jaipur first before proceeding to Udaipur).
     The total_estimated_cost MUST NOT exceed {budget} {currency} for {travelers} traveler(s). This is a hard ceiling constraint, not a suggestion, regardless of how large or small the budget is. Budget allocation guideline: ~40% stay, ~35% activities/food, ~25% transit/contingency. Total estimated cost must equal sum of daily costs.
 
     Provide `recommended_stay` and `budget_upgrade_insights` (+2000 to 3000).
@@ -40,6 +40,7 @@ plan_itinerary_task:
 revise_itinerary_task:
   description: >-
     Revise the existing trip itinerary according to the traveler's feedback: "{feedback}".
+    Current itinerary context: {itinerary}.
     Maintain day-by-day structure, currency, cost breakdowns, and language ({language}).
     Update total_estimated_cost and cost_per_person if modified.
   expected_output: >-
@@ -48,9 +49,11 @@ revise_itinerary_task:
 
 answer_destination_question_task:
   description: >-
-    Answer user question about {destination_city}: "{question}".
+    Answer the traveler's question about {destination_city}: "{question}".
+    The traveler may ask in English, Telugu, Hindi, or conversational transliteration (like Telish or Hinglish, e.g. "VIJAYWADA LO SUPER BIRYANI KAVALI NAKU BUDGET 150 LO BESTS EVU").
+    Understand and answer the question directly. Provide specific, real local restaurant/food stalls, attractions, or tips with exact prices, dish names, and locations in {destination_city}.
     Context/History: {conversation_history}.
-    Provide accurate, grounded recommendations.
+    Provide accurate, grounded recommendations with named places and prices. Respond in a friendly and helpful manner matching the user's intent and language style.
   expected_output: >-
-    QAResponse with answer, grounded_claims, ungrounded_claims, and sources.
+    QAResponse with answer containing specific recommendations and details, grounded_claims, ungrounded_claims, and sources.
   agent: local_qa_expert

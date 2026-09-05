@@ -481,6 +481,9 @@ class TripItinerary(BaseModel):
     """Final output of the Travel Concierge — the end deliverable."""
 
     destination_city: str
+    origin_city: str | None = Field(
+        default=None, description="Trip departure hub / origin city"
+    )
     cities_visited: list[str] | None = Field(
         default=None, description="Ordered list of cities visited in a multi-city itinerary"
     )

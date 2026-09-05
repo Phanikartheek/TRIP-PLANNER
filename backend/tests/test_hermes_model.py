@@ -41,5 +41,5 @@ def test_hermes3_fallback_to_groq_when_key_missing(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test_groq_key_12345")
     crew = TripPlannerCrew()
     llm = crew._get_llm()
-    assert llm.model == "groq/qwen/qwen3.6-27b"
+    assert llm.model == "groq/qwen/qwen3.8-27b"
     assert llm.api_key == "gsk_test_groq_key_12345"

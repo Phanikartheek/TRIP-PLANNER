@@ -1976,4 +1976,388 @@ h1, h2, h3, h4, .brand-font {
   line-height: 1.5;
 }
 
+/* ==========================================================================
+   Feature 1: Interactive Live Route Map & Custom Markers
+   ========================================================================== */
+
+.map-controls-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.map-filter-btn {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.map-filter-btn:hover {
+  background: rgba(56, 189, 248, 0.15);
+  color: #e2e8f0;
+  border-color: rgba(56, 189, 248, 0.5);
+  transform: translateY(-1px);
+}
+
+.map-filter-btn.active {
+  background: rgba(56, 189, 248, 0.25);
+  color: #38bdf8;
+  border-color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
+}
+
+/* Custom HTML Leaflet Map Markers */
+.custom-map-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+  font-weight: 800;
+  font-family: 'Outfit', sans-serif;
+  color: #ffffff;
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.custom-map-pin:hover {
+  transform: scale(1.22) translateY(-4px);
+  z-index: 1000 !important;
+}
+
+.pin-hub {
+  background: linear-gradient(135deg, #0284c7, #2563eb);
+  border: 2px solid #38bdf8;
+}
+
+.pin-stay {
+  background: linear-gradient(135deg, #059669, #047857);
+  border: 2px solid #34d399;
+}
+
+.pin-day {
+  background: linear-gradient(135deg, #7c3aed, #6366f1);
+  border: 2px solid #c084fc;
+}
+
+/* Pulse keyframe for departure hub */
+@keyframes radar-pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 14px rgba(56, 189, 248, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0);
+  }
+}
+
+.pin-pulse::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  border-radius: 50%;
+  animation: radar-pulse 2s infinite;
+  pointer-events: none;
+}
+
+/* Leaflet Dark Theme Popup Overrides */
+.leaflet-popup-content-wrapper {
+  background: rgba(15, 23, 42, 0.95) !important;
+  backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(56, 189, 248, 0.4) !important;
+  border-radius: 12px !important;
+  color: #f8fafc !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6) !important;
+  padding: 0 !important;
+}
+
+.leaflet-popup-tip {
+  background: rgba(15, 23, 42, 0.95) !important;
+  border: 1px solid rgba(56, 189, 248, 0.4) !important;
+}
+
+.leaflet-popup-content {
+  margin: 12px 16px !important;
+  font-family: 'Inter', sans-serif !important;
+  line-height: 1.45 !important;
+}
+
+.map-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.map-popup-title {
+  font-weight: 800;
+  font-size: 0.95rem;
+  color: #f8fafc;
+  font-family: 'Outfit', sans-serif;
+}
+
+.map-popup-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.map-popup-body {
+  font-size: 0.82rem;
+  color: #cbd5e1;
+  margin-bottom: 8px;
+}
+
+.map-popup-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #38bdf8;
+  text-decoration: none;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.map-popup-btn:hover {
+  background: rgba(56, 189, 248, 0.25);
+  color: #ffffff;
+}
+
+/* ==========================================================================
+   Feature 2: Visual Budget Breakdown Donut Chart
+   ========================================================================== */
+
+.budget-donut-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.budget-chart-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 24px;
+  align-items: center;
+}
+
+@media (max-width: 768px) {
+  .budget-chart-layout {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+}
+
+.budget-canvas-box {
+  position: relative;
+  width: 100%;
+  max-width: 250px;
+  height: 250px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.budget-center-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.budget-center-label .center-sub {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.budget-center-label .center-cost {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #38bdf8;
+  font-family: 'Outfit', sans-serif;
+  margin-top: 2px;
+}
+
+.budget-legend-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.budget-legend-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.budget-legend-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(56, 189, 248, 0.35);
+  transform: translateX(3px);
+}
+
+.legend-meta-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.legend-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.legend-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.legend-category-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.legend-progress-bar {
+  width: 90px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.legend-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.legend-meta-right {
+  text-align: right;
+  padding-left: 10px;
+}
+
+.legend-amount {
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: #f8fafc;
+  font-family: 'Outfit', sans-serif;
+}
+
+.legend-pct {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+/* ==========================================================================
+   Feature 3: Hotel Booking Deep-Links
+   ========================================================================== */
+
+.hotel-booking-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.btn-booking-provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-booking-com {
+  background: linear-gradient(135deg, #003580, #00224f);
+  border: 1px solid #006ce4;
+  color: #ffffff !important;
+}
+
+.btn-booking-com:hover {
+  background: linear-gradient(135deg, #004cb3, #003580);
+  box-shadow: 0 4px 12px rgba(0, 108, 228, 0.45);
+  transform: translateY(-1px);
+}
+
+.btn-booking-mmt {
+  background: linear-gradient(135deg, #d32f2f, #b71c1c);
+  border: 1px solid #ef5350;
+  color: #ffffff !important;
+}
+
+.btn-booking-mmt:hover {
+  background: linear-gradient(135deg, #e53935, #c62828);
+  box-shadow: 0 4px 12px rgba(239, 83, 80, 0.45);
+  transform: translateY(-1px);
+}
+
+.btn-booking-google {
+  background: linear-gradient(135deg, #1a73e8, #1557b0);
+  border: 1px solid #4285f4;
+  color: #ffffff !important;
+}
+
+.btn-booking-google:hover {
+  background: linear-gradient(135deg, #1967d2, #185abc);
+  box-shadow: 0 4px 12px rgba(66, 133, 244, 0.45);
+  transform: translateY(-1px);
+}
+
+
 
