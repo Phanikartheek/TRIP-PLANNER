@@ -36,6 +36,8 @@ from trip_planner.schemas.models import (
     DestinationQuestion,
     QAResponse,
     RevisionRequest,
+    SmartRequest,
+    SmartRequestResponse,
     TripPlanRequest,
     clean_float,
 )
@@ -1754,6 +1756,158 @@ async def ask_question_endpoint(request: Request, payload: DestinationQuestion):
         status="pending",
         created_at=job_rec["created_at"],
     )
+
+
+@app.post("/api/smart-request", response_model=SmartRequestResponse)
+@limiter.limit("30/minute")
+async def smart_request_endpoint(request: Request, payload: SmartRequest):
+    """
+    Intelligent routing endpoint.
+    Accepts a single user prompt string, classifies intent (new_trip, revision, question, comparison),
+    and cleanly routes the request to existing handlers without duplicated logic.
+    """
+    from trip_planner.patterns.router import TripRouter, UserIntent
+
+    has_active = bool(payload.job_id)
+    classification = TripRouter.classify_intent(payload.text, has_active_job=has_active)
+    intent = classification.intent
+    extracted = classification.extracted_params
+
+    # Route 1: NEW TRIP
+    if intent == UserIntent.NEW_TRIP:
+        dest_city = extracted.get("cities") or "Goa"
+        origin_city = extracted.get("origin") or payload.origin or "Delhi"
+        trip_len = extracted.get("trip_length", 3)
+        budget_val = extracted.get("budget", 20000.0)
+
+        plan_req = TripPlanRequest(
+            origin=origin_city,
+            cities=dest_city,
+            trip_length=trip_len,
+            budget=budget_val,
+            interests=payload.text,
+            travelers=1,
+            language=payload.language,
+            travel_mode="domestic",
+            currency="INR",
+        )
+        plan_res = await plan_trip_endpoint(request, plan_req)
+        return SmartRequestResponse(
+            intent="new_trip",
+            routed_to="/api/plan-trip",
+            job_id=plan_res.job_id,
+            status="pending",
+            message=f"Routing to trip planner: {trip_len}-day trip to {dest_city} from {origin_city} (Budget: ₹{budget_val:,.0f}).",
+            details={
+                "cities": dest_city,
+                "origin": origin_city,
+                "trip_length": trip_len,
+                "budget": budget_val,
+            },
+        )
+
+    # Route 2: REVISION
+    elif intent == UserIntent.REVISION:
+        target_job_id = payload.job_id
+        if not target_job_id:
+            with db.get_connection() as conn:
+                row = conn.cursor().execute(
+                    "SELECT job_id FROM jobs WHERE status='complete' AND (job_type='plan' OR job_type='revise') ORDER BY created_at DESC LIMIT 1"
+                ).fetchone()
+                if row:
+                    target_job_id = row["job_id"]
+
+        if not target_job_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Revision intent detected, but no active or prior completed trip was found to revise. Please create a trip first.",
+            )
+
+        feedback_text = extracted.get("feedback") or payload.text
+        rev_req = RevisionRequest(
+            job_id=target_job_id,
+            feedback=feedback_text,
+            language=payload.language,
+        )
+        rev_res = await revise_trip_endpoint(request, rev_req)
+        return SmartRequestResponse(
+            intent="revision",
+            routed_to="/api/revise-trip",
+            job_id=rev_res.job_id,
+            status="pending",
+            message=f"Routing to itinerary reviser for trip {target_job_id[:8]} with feedback: '{feedback_text[:80]}...'",
+            details={"parent_job_id": target_job_id, "feedback": feedback_text},
+        )
+
+    # Route 3: DESTINATION Q&A
+    elif intent == UserIntent.QUESTION:
+        target_job_id = payload.job_id
+        if not target_job_id:
+            with db.get_connection() as conn:
+                row = conn.cursor().execute(
+                    "SELECT job_id FROM jobs WHERE status='complete' ORDER BY created_at DESC LIMIT 1"
+                ).fetchone()
+                if row:
+                    target_job_id = row["job_id"]
+
+        if not target_job_id:
+            temp_job_id = str(uuid.uuid4())
+            db.create_job(job_id=temp_job_id, job_type="plan", status="complete", result={"destination_city": "India", "trip_length_days": 1})
+            target_job_id = temp_job_id
+
+        q_text = extracted.get("question") or payload.text
+        q_req = DestinationQuestion(
+            job_id=target_job_id,
+            question=q_text,
+            language=payload.language,
+        )
+        qa_res = await ask_question_endpoint(request, q_req)
+        return SmartRequestResponse(
+            intent="question",
+            routed_to="/api/ask-question",
+            job_id=qa_res.job_id,
+            status="pending",
+            message=f"Routing to local Q&A expert for question: '{q_text[:80]}...'",
+            details={"job_id": qa_res.job_id, "question": q_text},
+        )
+
+    # Route 4: COMPARISON
+    elif intent == UserIntent.COMPARISON:
+        cities = extracted.get("cities") or []
+        matching_job_ids = []
+        if cities:
+            with db.get_connection() as conn:
+                for c in cities:
+                    row = conn.cursor().execute(
+                        "SELECT job_id FROM jobs WHERE status='complete' AND result LIKE ? ORDER BY created_at DESC LIMIT 1",
+                        (f"%{c}%",),
+                    ).fetchone()
+                    if row:
+                        matching_job_ids.append(row["job_id"])
+
+        if len(matching_job_ids) >= 2:
+            comp_res = await compare_trips_endpoint(CompareTripsRequest(job_ids=matching_job_ids[:3]))
+            return SmartRequestResponse(
+                intent="comparison",
+                routed_to="/api/compare-trips",
+                job_id=matching_job_ids[0],
+                status="success",
+                message=f"Comparing completed trips for: {', '.join(cities)}",
+                details=comp_res,
+            )
+        else:
+            return SmartRequestResponse(
+                intent="comparison",
+                routed_to="/api/compare-trips",
+                job_id=None,
+                status="info",
+                message=f"Comparison intent detected between {', '.join(cities) if cities else 'destinations'}. "
+                        f"Please generate itineraries for both to view side-by-side budget & weather comparison.",
+                details={"cities": cities, "raw_query": payload.text},
+            )
+
+    raise HTTPException(status_code=400, detail="Unable to classify intent.")
+
 
 
 @app.get("/api/status/{job_id}", response_model=JobStatusResponse)

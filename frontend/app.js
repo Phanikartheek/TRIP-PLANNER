@@ -1123,6 +1123,207 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // --- Smart Request Router Handler (Part C: Routing Pattern) ---
+  const smartInput = document.getElementById('smart-request-input');
+  const smartBtn = document.getElementById('btn-smart-submit');
+  const smartStatus = document.getElementById('smart-request-status');
+
+  async function handleSmartRequest() {
+    if (!smartInput) return;
+    const query = smartInput.value.trim();
+    if (!query) {
+      showToast('⚠️ Please enter a trip request, question, or revision.');
+      return;
+    }
+
+    if (smartBtn) {
+      smartBtn.disabled = true;
+      smartBtn.innerHTML = `
+        <div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:4px;"></div>
+        <span>Routing...</span>
+      `;
+    }
+
+    if (smartStatus) {
+      smartStatus.style.display = 'block';
+      smartStatus.style.background = 'rgba(79, 70, 229, 0.08)';
+      smartStatus.style.color = '#4338ca';
+      smartStatus.innerHTML = `🪄 <strong>Analyzing intent...</strong> Routing to specialized agent pipeline...`;
+    }
+
+    try {
+      const activeJobId = currentJobId || localStorage.getItem('trip_planner_last_job_id') || null;
+      const originVal = (originInput && originInput.value.trim()) || 'Bengaluru';
+      const langVal = (languageSelect && languageSelect.value) || 'en';
+
+      const response = await fetch(`${API_BASE}/api/smart-request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: query,
+          job_id: activeJobId,
+          origin: originVal,
+          language: langVal,
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || `Routing failed (${response.status})`);
+      }
+
+      const resData = await response.json();
+      const { intent, routed_to, job_id: resJobId, message, details } = resData;
+
+      if (smartStatus) {
+        const intentBadges = {
+          new_trip: '🚀 New Trip Planner',
+          revision: '✏️ Itinerary Reviser',
+          question: '🔍 Destination Q&A',
+          comparison: '📊 Destination Comparison',
+        };
+        const badge = intentBadges[intent] || intent;
+        smartStatus.innerHTML = `<strong>${badge}</strong>: ${escapeHtml(message)}`;
+      }
+
+      showToast(`🪄 Routed: ${intent.toUpperCase()}`);
+
+      // Handle based on classified intent
+      if (intent === 'new_trip' && resJobId) {
+        currentJobId = resJobId;
+        try { localStorage.setItem('trip_planner_last_job_id', resJobId); } catch (e) {}
+
+        if (details && details.cities && citiesInput) citiesInput.value = details.cities;
+        if (details && details.trip_length && tripLengthSelect) tripLengthSelect.value = details.trip_length;
+        if (details && details.budget && budgetInput) {
+          budgetInput.value = details.budget;
+          if (budgetValue) budgetValue.textContent = Number(details.budget).toLocaleString();
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = `
+          <div class="spinner" style="width:18px;height:18px;border-width:2px;"></div>
+          <span>Agents Collaborating & Researching...</span>
+        `;
+        trackerSection.classList.add('active');
+        resultsSection.classList.remove('active');
+        trackerSection.scrollIntoView({ behavior: 'smooth' });
+        startAgentProgressAnimation();
+
+        let jobStatus = 'pending';
+        let itineraryData = null;
+        let pollAttempts = 0;
+        while (jobStatus === 'pending' || jobStatus === 'running') {
+          pollAttempts++;
+          if (pollAttempts > 300) throw new Error('Request timed out after 15 minutes.');
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const statusRes = await fetch(`${API_BASE}/api/status/${resJobId}`);
+          if (!statusRes.ok) break;
+          const statusData = await statusRes.json();
+          jobStatus = statusData.status;
+          if (jobStatus === 'complete') {
+            itineraryData = statusData.result;
+            break;
+          } else if (jobStatus === 'failed') {
+            throw new Error(statusData.error || 'Trip planning job failed.');
+          }
+        }
+        if (itineraryData) {
+          currentItinerary = itineraryData;
+          finishAgentProgressAnimation();
+          renderItinerary(currentItinerary, details.budget || 20000, 'INR');
+          showToast('🎉 Your AI trip itinerary is ready!');
+        }
+
+      } else if (intent === 'revision' && resJobId) {
+        currentJobId = resJobId;
+        showToast('🔄 Revising itinerary based on your request...');
+        let jobStatus = 'pending';
+        let updatedItinerary = null;
+        while (jobStatus === 'pending' || jobStatus === 'running') {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const statusRes = await fetch(`${API_BASE}/api/status/${resJobId}`);
+          if (!statusRes.ok) break;
+          const statusData = await statusRes.json();
+          jobStatus = statusData.status;
+          if (jobStatus === 'complete') {
+            updatedItinerary = statusData.result;
+            break;
+          } else if (jobStatus === 'failed') {
+            throw new Error(statusData.error || 'Revision failed.');
+          }
+        }
+        if (updatedItinerary) {
+          currentItinerary = updatedItinerary;
+          renderItinerary(currentItinerary, currentItinerary.total_estimated_cost, currentItinerary.currency || 'INR');
+          showToast('✨ Itinerary successfully revised!');
+        }
+
+      } else if (intent === 'question' && resJobId) {
+        showToast('🔍 Local Expert answering your question...');
+        let jobStatus = 'pending';
+        let qaResult = null;
+        while (jobStatus === 'pending' || jobStatus === 'running') {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const statusRes = await fetch(`${API_BASE}/api/status/${resJobId}`);
+          if (!statusRes.ok) break;
+          const statusData = await statusRes.json();
+          jobStatus = statusData.status;
+          if (jobStatus === 'complete') {
+            qaResult = statusData.result;
+            break;
+          } else if (jobStatus === 'failed') {
+            throw new Error(statusData.error || 'Q&A failed.');
+          }
+        }
+        if (qaResult && qaConversationThread) {
+          const answerText = qaResult.answer || (typeof qaResult === 'string' ? qaResult : JSON.stringify(qaResult));
+          qaTurnCount++;
+          const turnCard = document.createElement('div');
+          turnCard.className = 'qa-turn-card';
+          turnCard.innerHTML = `
+            <div class="qa-turn-header">
+              <span class="qa-turn-badge">📍 Turn #${qaTurnCount} • Smart Router Q&A</span>
+              <span class="qa-turn-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            </div>
+            <div class="qa-user-query">💬 <span>${escapeHtml(query)}</span></div>
+            <div class="qa-agent-response">${escapeHtml(answerText)}</div>
+          `;
+          qaConversationThread.appendChild(turnCard);
+          qaConversationThread.classList.remove('hidden');
+          qaConversationThread.scrollIntoView({ behavior: 'smooth' });
+          showToast('✅ Question answered below!');
+        }
+      }
+
+    } catch (err) {
+      console.error('Smart router error:', err);
+      if (smartStatus) {
+        smartStatus.style.background = 'rgba(239, 68, 68, 0.1)';
+        smartStatus.style.color = '#b91c1c';
+        smartStatus.textContent = `❌ Error: ${err.message}`;
+      }
+      showToast(`❌ Routing Error: ${err.message}`);
+    } finally {
+      if (smartBtn) {
+        smartBtn.disabled = false;
+        smartBtn.innerHTML = `<span>Ask / Route</span><span>➔</span>`;
+      }
+    }
+  }
+
+  if (smartBtn) {
+    smartBtn.addEventListener('click', handleSmartRequest);
+  }
+  if (smartInput) {
+    smartInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleSmartRequest();
+      }
+    });
+  }
+
   // --- Agent Progression Animation ---
   function startAgentProgressAnimation() {
     resetAgentCards();

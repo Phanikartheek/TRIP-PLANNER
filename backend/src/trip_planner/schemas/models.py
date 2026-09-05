@@ -651,3 +651,23 @@ class EvaluationResult(BaseModel):
     passes: bool = Field(..., description="True if itinerary meets budget ceiling and quality checks")
     feedback: str = Field(..., description="Specific and actionable feedback on failures or confirmation")
 
+
+class SmartRequest(BaseModel):
+    """User request payload for the intelligent routing endpoint."""
+
+    text: str = Field(..., description="Natural language user request, e.g. 'Plan a 3-day trip to Goa' or 'Make day 2 cheaper'")
+    job_id: str | None = Field(default=None, description="Optional active trip job ID for context (for revisions/questions/comparisons)")
+    origin: str = Field(default="Delhi", description="Optional departure city")
+    language: str = Field(default="en", description="Output language code: 'en', 'te', or 'hi'")
+
+
+class SmartRequestResponse(BaseModel):
+    """Routing response containing identified intent and target action."""
+
+    intent: str = Field(..., description="Classified intent: 'new_trip', 'revision', 'question', or 'comparison'")
+    routed_to: str = Field(..., description="API route or handler executed")
+    job_id: str | None = Field(default=None, description="Job ID created or referenced")
+    status: str = Field(default="success", description="Status of the dispatched request")
+    message: str = Field(default="", description="Descriptive status message for the user")
+    details: dict[str, Any] = Field(default_factory=dict, description="Additional context or payload")
+
