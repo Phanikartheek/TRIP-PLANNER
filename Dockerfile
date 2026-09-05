@@ -1,37 +1,32 @@
-# Multi-stage production Dockerfile for AI Trip Planner
-FROM python:3.11-slim as builder
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install curl for container health checks
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install python package dependencies first for layer caching
+# Copy ALL source FIRST (backend/src must exist before pip install -e .)
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e .
-
-# Copy application source code
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 COPY run.py ./
 
-# Re-install package in editable mode with copied source
-RUN pip install --no-cache-dir -e .
+# Now install — backend/src exists so editable install works correctly
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -e .
 
-# Expose HTTP port
+# Expose default port (Railway overrides via $PORT env var)
 EXPOSE 8000
 
 # Environment defaults
-ENV PORT=8000 \
-    PYTHONUNBUFFERED=1 \
+ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/backend/src
 
-# Healthcheck to verify FastAPI is responding
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:8000/api/health || exit 1
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:${PORT:-8000}/api/health || exit 1
 
-# Launch the server
-CMD ["python", "run.py"]
+# Shell form so $PORT env var is expanded by Railway at runtime
+CMD uvicorn trip_planner.api.app:app --app-dir backend/src --host 0.0.0.0 --port ${PORT:-8000}
