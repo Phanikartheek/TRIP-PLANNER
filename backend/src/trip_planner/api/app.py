@@ -83,12 +83,20 @@ def _rate_limit_handler(request: Request, exc: Exception) -> Response:
 app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore[arg-type]
 
 # Enable CORS for frontend integrations
+# ALLOWED_ORIGINS env var: comma-separated list of allowed origins.
+# Defaults to localhost only for local dev. Set to the Railway domain in production.
+_raw_origins = os.environ.get(
+    "ALLOWED_ORIGINS",
+    "http://localhost:8000,http://127.0.0.1:8000",
+)
+ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
 )
 
 

@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any
 
 # app.py -> api -> trip_planner -> src -> backend -> root
-DEFAULT_DB_PATH = Path(os.environ.get("TRIP_PLANNER_DB_PATH", Path(__file__).resolve().parents[4] / "jobs.db"))
+_db_path_env = os.environ.get("DB_PATH") or os.environ.get("TRIP_PLANNER_DB_PATH")
+DEFAULT_DB_PATH = Path(_db_path_env) if _db_path_env else Path(__file__).resolve().parents[4] / "jobs.db"
 
 
 def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
