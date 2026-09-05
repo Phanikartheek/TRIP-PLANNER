@@ -1,8 +1,11 @@
 [phases.setup]
-nixPkgs = ["python311", "gcc"]
+nixPkgs = ["python3", "gcc"]
 
 [phases.install]
-cmds = ["pip install -e ."]
+cmds = [
+  "pip install --upgrade pip",
+  "pip install -e ."
+]
 
 [start]
 cmd = "uvicorn trip_planner.api.app:app --app-dir backend/src --host 0.0.0.0 --port $PORT"
