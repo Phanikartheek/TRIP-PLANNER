@@ -916,7 +916,7 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
             except Exception as e:
                 logger.warning(f"Trip length enforcement error: {e}")
 
-        # Deterministic Budget Optimization & Validation
+        # Deterministic Budget Validation: Surface honest warning if estimate exceeds requested budget by >5%
         user_budget = inputs.get("budget")
         if user_budget is not None:
             try:
@@ -925,32 +925,18 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
                 currency = str(out_dict.get("currency") or inputs.get("currency") or "INR").strip()
                 sym = "₹" if currency == "INR" else ("$" if currency == "USD" else ("€" if currency == "EUR" else f"{currency} "))
 
-                if target_budget > 0 and tot_cost > target_budget:
-                    # Proportionally scale down days and stays to fit strictly within target budget
-                    scale = target_budget / max(1.0, tot_cost)
-                    days_list = out_dict.get("days", [])
-                    if isinstance(days_list, list) and len(days_list) > 0:
-                        for d in days_list:
-                            if isinstance(d, dict) and "estimated_cost" in d:
-                                d["estimated_cost"] = round(clean_float(d.get("estimated_cost"), 0.0) * scale, 2)
-                                if isinstance(d.get("cost_breakdown"), list):
-                                    for item in d["cost_breakdown"]:
-                                        if isinstance(item, dict) and "amount" in item:
-                                            item["amount"] = round(clean_float(item.get("amount"), 0.0) * scale, 2)
-                        out_dict["total_estimated_cost"] = target_budget
-                        tot_cost = target_budget
-
-                    if isinstance(out_dict.get("recommended_stay"), dict) and out_dict["recommended_stay"].get("estimated_price_per_night"):
-                        out_dict["recommended_stay"]["estimated_price_per_night"] = round(
-                            clean_float(out_dict["recommended_stay"]["estimated_price_per_night"], 0.0) * scale, 2
-                        )
-                    if isinstance(out_dict.get("recommended_stays"), list):
-                        for s in out_dict["recommended_stays"]:
-                            if isinstance(s, dict) and s.get("estimated_price_per_night"):
-                                s["estimated_price_per_night"] = round(clean_float(s["estimated_price_per_night"], 0.0) * scale, 2)
-
-                out_dict["budget_exceeded_warning"] = None
-                out_dict["budget_alert"] = None
+                if target_budget > 0 and tot_cost > (target_budget * 1.05):
+                    overrun = tot_cost - target_budget
+                    pct = (overrun / target_budget) * 100.0
+                    warning_msg = (
+                        f"⚠️ Budget Alert: This itinerary's estimated cost ({sym}{tot_cost:,.0f}) "
+                        f"exceeds your requested budget ({sym}{target_budget:,.0f}) by {sym}{overrun:,.0f} ({pct:.1f}%)."
+                    )
+                    out_dict["budget_exceeded_warning"] = warning_msg
+                    out_dict["budget_alert"] = warning_msg
+                else:
+                    out_dict["budget_exceeded_warning"] = None
+                    out_dict["budget_alert"] = None
             except Exception as e:
                 print(f"Budget check error: {e}")
 

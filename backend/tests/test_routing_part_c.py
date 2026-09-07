@@ -59,7 +59,10 @@ def test_classify_comparison_intent():
     assert "Pondicherry" in res.extracted_params["cities"]
 
 
-def test_smart_request_api_routes_new_trip(client):
+def test_smart_request_api_routes_new_trip(client, monkeypatch):
+    async def mock_exec(*args, **kwargs):
+        pass
+    monkeypatch.setattr("trip_planner.api.app._execute_trip_job", mock_exec)
     res = client.post(
         "/api/smart-request",
         json={

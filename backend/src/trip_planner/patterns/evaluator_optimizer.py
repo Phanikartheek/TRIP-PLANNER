@@ -112,28 +112,19 @@ class ItineraryOptimizer:
         if not itinerary.origin_city and default_origin:
             itinerary.origin_city = default_origin
 
-        # 2. Fix budget overrun by proportionally trimming daily expenses & stay prices
+        # 2. Budget adherence: NEVER scale or fabricate numbers.
+        # Preserve genuine itemized costs intact and attach an honest budget warning if overrun.
         if target_budget and target_budget > 0 and itinerary.total_estimated_cost > target_budget:
-            scale_factor = target_budget / max(1.0, itinerary.total_estimated_cost)
-            if itinerary.days:
-                for day in itinerary.days:
-                    day.estimated_cost = round(day.estimated_cost * scale_factor, 2)
-                    if day.cost_breakdown:
-                        for item in day.cost_breakdown:
-                            item.amount = round(item.amount * scale_factor, 2)
-                        day.estimated_cost = round(sum(i.amount for i in day.cost_breakdown), 2)
-
-            if itinerary.recommended_stay and itinerary.recommended_stay.estimated_price_per_night:
-                itinerary.recommended_stay.estimated_price_per_night = round(
-                    itinerary.recommended_stay.estimated_price_per_night * scale_factor, 2
-                )
-
-            if itinerary.recommended_stays:
-                for s in itinerary.recommended_stays:
-                    if s.estimated_price_per_night:
-                        s.estimated_price_per_night = round(s.estimated_price_per_night * scale_factor, 2)
-
-            itinerary.reconcile_total_estimated_cost()
+            overrun = itinerary.total_estimated_cost - target_budget
+            pct = (overrun / target_budget) * 100.0
+            currency = itinerary.currency or "INR"
+            sym = "₹" if currency.upper() == "INR" else f"{currency} "
+            warning_msg = (
+                f"⚠️ Budget Alert: This itinerary's estimated cost ({sym}{itinerary.total_estimated_cost:,.0f}) "
+                f"exceeds your requested budget ({sym}{target_budget:,.0f}) by {sym}{overrun:,.0f} ({pct:.1f}%)."
+            )
+            itinerary.budget_exceeded_warning = warning_msg
+            itinerary.budget_alert = warning_msg
 
         # 3. Ensure packing suggestions exist
         if not itinerary.packing_suggestions:

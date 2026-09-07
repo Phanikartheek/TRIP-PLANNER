@@ -60,7 +60,7 @@ The system implements the four foundational agentic workflows for robust, real-w
 1. **Routing**: Analyzes user intent, destination topology, and travel style to route between single-destination deep itineraries and multi-city geographic corridor synthesis.
 2. **Parallelization**: Concurrently fires independent research subagents to gather live weather forecasts, transport schedules, regional dining gems, and accommodation tiers.
 3. **Orchestrator-Workers**: For multi-city journeys, decomposes the corridor into per-city bundles, dispatches concurrent workers via a `ThreadPoolExecutor`, and synthesizes sequential day-by-day plans.
-4. **Evaluator-Optimizer**: Iteratively scores candidate itineraries against strict quality gates and budget ceilings (e.g. ₹25,000), automatically trimming bloat and scaling expenses to guarantee zero budget overruns.
+4. **Evaluator-Optimizer**: Evaluates candidate itineraries against strict quality gates and budget ceilings (e.g. ₹25,000). When costs exceed the target budget, the system preserves raw, un-fabricated line-item estimates and attaches an honest, deterministic `budget_exceeded_warning` with exact overrun amount and percentage.
 
 ---
 
@@ -85,7 +85,7 @@ The system implements the four foundational agentic workflows for robust, real-w
   3. 🚆 Transit & Local Commute
   4. 🎟️ Activities & Sightseeing Entry Fees
   5. 🛡️ Contingency & Emergency Buffer
-- **Strict Budget Compliance**: Daily expenses and transit costs are dynamically scaled to guarantee the total estimated spend strictly respects the user's requested budget.
+- **Honest Budget Transparency**: Real costs are preserved without artificial number fabrication. When the candidate itinerary exceeds the user's requested budget ceiling, the system flags it immediately with a prominent, honest warning detailing the exact overrun amount and percentage, along with actionable budget optimization suggestions.
 
 ### 💬 5. 1-Click WhatsApp Sharing & Offline PWA
 - **WhatsApp Day Exporter**: Tap "Send Day X to WhatsApp" to generate a pre-formatted message with timings, hotel names, meals, and Google Maps directions ready to share with traveling companions.
@@ -124,7 +124,7 @@ trip_planner/
 │   │       │   └── tasks.yaml       # Task descriptions and expected outputs
 │   │       ├── patterns/            # Autonomous 4-Pattern Architecture
 │   │       │   ├── router.py        # Pattern 1: Routing & Persona Classification
-│   │       │   ├── parallel.py      # Pattern 2: Concurrent Multi-Source Researchers
+│   │       │   ├── parallelizer.py  # Pattern 2: Concurrent Multi-Source Researchers
 │   │       │   ├── orchestrator.py  # Pattern 3: Orchestrator-Workers Multi-City Engine
 │   │       │   └── evaluator_optimizer.py # Pattern 4: Evaluator-Optimizer Feedback Loop
 │   │       ├── schemas/

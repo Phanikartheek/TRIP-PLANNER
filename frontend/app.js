@@ -1500,6 +1500,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Andhra Pradesh & Telangana
         'vijayawada': [16.5062, 80.6480],
         'bezawada': [16.5062, 80.6480],
+        'andhra pradesh': [16.5062, 80.6480],
+        'andhra': [16.5062, 80.6480],
+        'andrapradesh': [16.5062, 80.6480],
         'guntur': [16.3067, 80.4365],
         'tirupati': [13.6288, 79.4192],
         'tirumala': [13.6833, 79.3500],
@@ -1512,6 +1515,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'kurnool': [15.8281, 78.0373],
         'kadapa': [14.4673, 78.8242],
         'hyderabad': [17.3850, 78.4867],
+        'telangana': [17.3850, 78.4867],
         'warangal': [17.9689, 79.5941],
         'araku': [18.3273, 82.8775],
         'amaravati': [16.5131, 80.5165],
@@ -1653,7 +1657,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const polylinePoints = [];
 
       // 1. Plot Departure Hub (Origin)
-      const originCoords = getCoords(originHubName, [12.9716, 77.5946]);
+      const originCoords = getCoords(originHubName, baseCoords);
       const hubIcon = L.divIcon({
         className: '',
         html: `<div class="custom-map-pin pin-hub pin-pulse" style="width: 36px; height: 36px; font-size: 16px;">🛫</div>`,
