@@ -946,6 +946,13 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
         except Exception as media_err:
             logger.warning(f"Media enrichment error: {media_err}")
 
+        # Sanity check: Ensure generated itinerary has structured days and positive cost
+        tot_cost = clean_float(out_dict.get("total_estimated_cost", 0.0), 0.0) if isinstance(out_dict, dict) else 0.0
+        days_list = out_dict.get("days", []) if isinstance(out_dict, dict) else []
+        if not isinstance(out_dict, dict) or not days_list or len(days_list) == 0 or tot_cost <= 0.0:
+            logger.error(f"[_run_crew_sync] Malformed itinerary generated: cost={tot_cost}, days={len(days_list) if isinstance(days_list, list) else 0}")
+            raise ValueError("AI response was malformed after research phase - try a less constrained request")
+
     return out_dict
 
 
@@ -977,6 +984,16 @@ async def _execute_trip_job(job_id: str, inputs: dict[str, Any]) -> None:
     try:
         # Give CrewAI up to 900 seconds (15 minutes) to complete the multi-agent pipeline with live web searches and rate limit backoffs
         itinerary_data = await asyncio.wait_for(asyncio.to_thread(_run_crew_sync, inputs), timeout=900.0)
+
+        # Sanity check: Total cost must be > 0 and days list must be non-empty!
+        tot_cost = clean_float(itinerary_data.get("total_estimated_cost", 0.0), 0.0) if isinstance(itinerary_data, dict) else 0.0
+        days_list = itinerary_data.get("days", []) if isinstance(itinerary_data, dict) else []
+        if not isinstance(itinerary_data, dict) or not days_list or len(days_list) == 0 or tot_cost <= 0.0:
+            err_msg = "AI response was malformed after research phase - try a less constrained request"
+            logger.error(f"[_execute_trip_job] Malformed itinerary for job {job_id}: cost={tot_cost}, days={len(days_list) if isinstance(days_list, list) else 0}")
+            db.update_job(job_id, status="failed", error=err_msg)
+            return
+
         db.update_job(job_id, status="complete", result=itinerary_data)
     except asyncio.TimeoutError:
         logger.error(f"[_execute_trip_job] CrewAI pipeline execution timed out after 900s for job {job_id}")
@@ -984,7 +1001,8 @@ async def _execute_trip_job(job_id: str, inputs: dict[str, Any]) -> None:
     except Exception as e:
         err_text = str(e) or repr(e)
         logger.error(f"[_execute_trip_job] CrewAI pipeline execution failed: {err_text}")
-        db.update_job(job_id, status="failed", error=f"AI Trip Planning failed: {err_text}")
+        clean_error = err_text if "AI response was malformed after research phase" in err_text else f"AI Trip Planning failed: {err_text}"
+        db.update_job(job_id, status="failed", error=clean_error)
 
 
 async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:

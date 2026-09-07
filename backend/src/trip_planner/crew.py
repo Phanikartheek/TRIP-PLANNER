@@ -430,6 +430,14 @@ class TripPlannerCrew:
 
         data = itinerary.model_dump() if hasattr(itinerary, "model_dump") else dict(itinerary)
         total_cost = clean_float(data.get("total_estimated_cost", 0.0), 0.0)
+        days = data.get("days", [])
+
+        # Criterion 0: Non-empty days & positive estimated cost
+        if not isinstance(days, list) or len(days) == 0 or total_cost <= 0.0:
+            return EvaluationResult(
+                passes=False,
+                feedback="Itinerary is malformed with empty schedule or zero estimated cost. Generation must include structured days with concrete expenses."
+            )
 
         # Criterion 1: Hard budget ceiling
         if target_budget > 0 and total_cost > target_budget:

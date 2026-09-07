@@ -166,3 +166,57 @@ def test_evaluator_optimizer_regeneration_loop_mocked(monkeypatch):
     assert final_result["total_estimated_cost"] == 4500.0
     assert final_result["evaluation_passes"] is True
     assert final_result["evaluation_attempts"] == 2
+
+
+def test_evaluator_fails_empty_days_or_zero_cost():
+    """
+    Verifies that the Evaluator explicitly FAILS itineraries with empty days or zero cost.
+    """
+    crew = TripPlannerCrew()
+    empty_itinerary = {
+        "destination_city": "Goa",
+        "total_estimated_cost": 0.0,
+        "days": [],
+    }
+
+    res = crew.evaluate_itinerary(empty_itinerary, target_budget=3000.0, destination_city="Goa")
+    assert isinstance(res, EvaluationResult)
+    assert res.passes is False
+    assert "malformed" in res.feedback.lower() or "empty" in res.feedback.lower()
+
+
+def test_execute_trip_job_fails_on_malformed_empty_itinerary(monkeypatch):
+    """
+    Verifies that _execute_trip_job marks the job as FAILED (not complete with cost=0)
+    when LLM degrades to prose or generates an empty itinerary.
+    """
+    import asyncio
+    from trip_planner.api import db
+    from trip_planner.api.app import _execute_trip_job
+
+    job_id = "test-malformed-empty-job-123"
+    db.init_db()
+    db.create_job(job_id=job_id, job_type="plan", status="pending")
+
+    # Mock _run_crew_sync returning empty itinerary / 0 cost
+    def mock_empty_crew_sync(inputs):
+        return {
+            "destination_city": "Goa",
+            "destination_country": "Awaiting user input",
+            "trip_length_days": 1,
+            "currency": "INR",
+            "travelers": 1,
+            "total_estimated_cost": 0.0,
+            "days": [],
+        }
+
+    monkeypatch.setattr("trip_planner.api.app._run_crew_sync", mock_empty_crew_sync)
+
+    inputs = {"origin": "Bengaluru", "cities": "Goa", "trip_length": 3, "budget": 3000.0}
+    asyncio.run(_execute_trip_job(job_id, inputs))
+
+    job = db.get_job(job_id)
+    assert job is not None
+    assert job["status"] == "failed"
+    assert "AI response was malformed after research phase - try a less constrained request" in job["error"]
+    assert not job.get("result")

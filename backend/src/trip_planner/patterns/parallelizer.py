@@ -278,4 +278,16 @@ class ParallelCityResearchTool(BaseTool):
     def _run(self, city: str, interests: str = "") -> str:
         researcher = ParallelResearcher()
         guide = researcher.gather_parallel_city_guide(city=city, interests=interests)
+        # Token budget cap: trim verbose descriptions and limit lists so downstream context stays compact (<1000 tokens per city)
+        guide.top_attractions = guide.top_attractions[:3]
+        for a in guide.top_attractions:
+            a.description = a.description[:120]
+        guide.local_cuisine = [c[:80] for c in (guide.local_cuisine or [])[:2]]
+        guide.local_events = guide.local_events[:2]
+        for e in guide.local_events:
+            e.description = e.description[:100]
+        guide.nearby_day_trips = guide.nearby_day_trips[:2]
+        for dt in guide.nearby_day_trips:
+            dt.why_visit = dt.why_visit[:100]
+        guide.best_season_and_weather = guide.best_season_and_weather[:150]
         return guide.model_dump_json()

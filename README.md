@@ -62,7 +62,7 @@ The system implements the four foundational agentic workflows for robust, real-w
 3. **Orchestrator-Workers**: For multi-city journeys, decomposes the corridor into per-city bundles, dispatches concurrent workers via a `ThreadPoolExecutor`, and synthesizes sequential day-by-day plans.
 4. **Evaluator-Optimizer**: Evaluates candidate itineraries against strict quality gates and budget ceilings (e.g. ₹25,000). When costs exceed the target budget, the system preserves raw, un-fabricated line-item estimates and attaches an honest, deterministic `budget_exceeded_warning` with exact overrun amount and percentage.
 
----
+---                                                                                                                                        
 
 ## 🌟 Core Real-World Features
 
