@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Trip Planner | India & Global Multi-Agent Travel Engine</title>
   <meta name="description" content="Plan domestic Indian getaways and international vacations with autonomous AI agents researching trains, weather, local delicacies, and structured itineraries.">
+  <script>
+    // Force purge all stale Service Workers and browser caches immediately
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(regs) {
+        for (let r of regs) { r.unregister(); }
+      });
+    }
+    if ('caches' in window) {
+      caches.keys().then(function(keys) {
+        for (let k of keys) { caches.delete(k); }
+      });
+    }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -521,6 +534,24 @@
             <span style="font-size: 0.78rem; font-weight: 700; padding: 4px 10px; border-radius: 20px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4);" id="badge-distance-saved">
               ⚡ 0 km Backtracking
             </span>
+          </div>
+        </div>
+
+        <!-- 🚉 Interactive Train Boarding Station & Route Optimization Toolbar -->
+        <div id="corridor-reorder-toolbar" style="margin: 12px 0 16px 0; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 1.3rem;">🚉</span>
+            <div>
+              <div style="font-size: 0.88rem; font-weight: 700; color: #38bdf8;">Your Train Boarding Station / Journey Start:</div>
+              <div style="font-size: 0.74rem; color: #94a3b8;">Select where you board the train (e.g. Vijayawada, Tirupati, Vizag) to cover all places sequentially with 0 backtracking!</div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <select id="route-start-station-select" style="background: #0b1120; border: 1px solid rgba(56, 189, 248, 0.5); color: #f8fafc; font-size: 0.85rem; font-weight: 600; padding: 7px 14px; border-radius: 6px; cursor: pointer; outline: none;">
+            </select>
+            <button type="button" id="btn-reorder-from-station" style="background: linear-gradient(135deg, #00F0FF 0%, #7928CA 100%); border: none; color: #fff; font-size: 0.85rem; font-weight: 700; padding: 8px 16px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 4px 15px rgba(0, 240, 255, 0.25); transition: transform 0.2s ease;">
+              <span>⚡ Start Route From Here & Re-order</span>
+            </button>
           </div>
         </div>
 
@@ -1134,6 +1165,6 @@
   <div class="toast-container" id="toast-container"></div>
 
 
-  <script src="app.js?v=2.0"></script>
+  <script src="app.js?v=5.0"></script>
 </body>
 </html>

@@ -10,6 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from trip_planner.schemas.models import clean_float
+
 
 class UserIntent(str, Enum):
     NEW_TRIP = "new_trip"
@@ -193,7 +195,7 @@ class TripRouter:
         is_multi = bool(inputs.get("multi_city")) or len(city_list) > 1
 
         days = int(inputs.get("trip_length", inputs.get("days", 3)))
-        budget = float(inputs.get("budget", 25000.0))
+        budget = clean_float(inputs.get("budget", 25000.0), 25000.0)
         travelers = max(1, int(inputs.get("travelers", 1)))
         budget_per_person_day = budget / (travelers * max(1, days))
 

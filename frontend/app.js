@@ -5,13 +5,21 @@
  */
 
 document.addEventListener('DOMContentLoaded', () => {
-  // --- Register Service Worker for 100% Offline Access ---
+  // --- Register Service Worker with cache busting ---
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js').then((reg) => {
-        console.log('✅ Service Worker registered for offline access:', reg.scope);
+        reg.update();
+        console.log('✅ Service Worker updated & registered:', reg.scope);
       }).catch((err) => {
         console.warn('Service Worker registration failed:', err);
+      });
+    });
+  }
+  if ('caches' in window) {
+    caches.keys().then(keys => {
+      keys.forEach(k => {
+        if (k !== 'trip-planner-v5') caches.delete(k);
       });
     });
   }
@@ -1835,6 +1843,150 @@ document.addEventListener('DOMContentLoaded', () => {
           }, 350);
         }
       };
+
+      // Expose helper to focus specific attraction & draw route on map
+      window.focusAttractionOnMap = (placeName, cityName, category) => {
+        const card = document.getElementById('itinerary-map-card');
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        const mapInstance = window.activeTripMap || map;
+        if (!mapInstance || typeof L === 'undefined') return;
+
+        const landmarkCoords = {
+          'chandragiri': [13.5833, 79.3167],
+          'raja mahal': [13.5833, 79.3167],
+          'padmavathi': [13.6150, 79.4500],
+          'tiruchanur': [13.6150, 79.4500],
+          'kapila theertham': [13.6480, 79.4180],
+          'silathoranam': [13.6880, 79.3450],
+          'tirumala': [13.6833, 79.3500],
+          'venkateswara': [13.6833, 79.3500],
+          'bliss': [13.6280, 79.4210],
+          'residency': [13.6280, 79.4210],
+          'laddoo': [13.6288, 79.4192],
+          'rayalaseema thali': [13.6295, 79.4220],
+          'kanaka durga': [16.5152, 80.6052],
+          'undavalli': [16.4967, 80.5794],
+          'prakasam': [16.5100, 80.6080],
+          'bhavani': [16.5200, 80.5900],
+          'babai hotel': [16.5120, 80.6280],
+          'manorama': [16.5080, 80.6400],
+          'kursura': [17.7135, 83.3228],
+          'submarine': [17.7135, 83.3228],
+          'kailasagiri': [17.7490, 83.3420],
+          'rk beach': [17.7126, 83.3190],
+          'ranganatha': [14.4450, 79.9800],
+          'mypadu': [14.5050, 80.1750]
+        };
+
+        const nameKey = String(placeName || '').toLowerCase();
+        const cityKey = String(cityName || '').toLowerCase();
+
+        // City station hubs
+        const stationHubs = {
+          'tirupati': { name: 'Tirupati Central Railway Station', coord: [13.6288, 79.4192] },
+          'tirumala': { name: 'Tirupati Central Railway Station', coord: [13.6288, 79.4192] },
+          'vijayawada': { name: 'Vijayawada Junction Railway Station', coord: [16.5062, 80.6480] },
+          'visakhapatnam': { name: 'Visakhapatnam Junction', coord: [17.6868, 83.2185] },
+          'nellore': { name: 'Nellore Railway Station', coord: [14.4426, 79.9865] }
+        };
+
+        let activeHub = stationHubs['tirupati'];
+        for (const [k, hub] of Object.entries(stationHubs)) {
+          if (cityKey.includes(k) || nameKey.includes(k)) {
+            activeHub = hub;
+            break;
+          }
+        }
+
+        let targetCoord = null;
+        for (const [k, pt] of Object.entries(landmarkCoords)) {
+          if (nameKey.includes(k)) {
+            targetCoord = pt;
+            break;
+          }
+        }
+
+        if (!targetCoord) {
+          const hash = nameKey.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+          const angle = (hash % 360) * (Math.PI / 180);
+          targetCoord = [activeHub.coord[0] + Math.sin(angle) * 0.045, activeHub.coord[1] + Math.cos(angle) * 0.045];
+        }
+
+        // Distance & travel time calculation
+        const R = 6371;
+        const dLat = (targetCoord[0] - activeHub.coord[0]) * Math.PI / 180;
+        const dLon = (targetCoord[1] - activeHub.coord[1]) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(activeHub.coord[0] * Math.PI / 180) * Math.cos(targetCoord[0] * Math.PI / 180) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const cVal = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const distKm = Math.max(1.5, Math.round((R * cVal * 1.3) * 10) / 10);
+        const estMins = Math.round(distKm * 2.5);
+
+        // Clear any prior attraction highlight or route
+        if (window.activeAttractionHighlight) {
+          try { mapInstance.removeLayer(window.activeAttractionHighlight); } catch (e) {}
+        }
+        if (window.activeAttractionRoute) {
+          try { mapInstance.removeLayer(window.activeAttractionRoute); } catch (e) {}
+        }
+
+        // Animated route polyline from base hub to destination
+        const routeLine = L.polyline([activeHub.coord, targetCoord], {
+          color: '#f59e0b',
+          weight: 5,
+          opacity: 0.95,
+          dashArray: '10, 10'
+        }).addTo(mapInstance);
+        window.activeAttractionRoute = routeLine;
+
+        // Emoji badge
+        const iconEmoji = (category && (category.includes('Fort') || category.includes('Citadel'))) ? '🏰'
+          : (category && (category.includes('Waterfall') || category.includes('Lake') || category.includes('Beach'))) ? '🌊'
+          : (category && (category.includes('Temple') || category.includes('Shrine'))) ? '🛕'
+          : (category && category.includes('Food')) ? '🍽️'
+          : '📍';
+
+        const attrIcon = L.divIcon({
+          className: '',
+          html: `<div class="custom-map-pin pin-hub pin-pulse" style="width: 44px; height: 44px; font-size: 20px; background: linear-gradient(135deg, #f59e0b, #ef4444); border: 2.5px solid #fff; box-shadow: 0 0 16px rgba(245, 158, 11, 0.85);" title="${escapeHtml(placeName)}">${iconEmoji}</div>`,
+          iconSize: [44, 44],
+          iconAnchor: [22, 22],
+          popupAnchor: [0, -22]
+        });
+
+        const marker = L.marker(targetCoord, { icon: attrIcon }).addTo(mapInstance);
+        window.activeAttractionHighlight = marker;
+
+        const navUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(activeHub.name)}&destination=${encodeURIComponent(placeName + ', ' + (cityName || 'Andhra Pradesh'))}&travelmode=driving`;
+
+        const popupHtml = `
+          <div class="map-popup-header" style="background: rgba(245, 158, 11, 0.18); border-bottom: 1px solid rgba(245, 158, 11, 0.35); padding: 8px 10px;">
+            <span class="map-popup-title" style="color: #fbbf24; font-size: 0.95rem; font-weight: 700;">${iconEmoji} ${escapeHtml(placeName)}</span>
+            <span class="map-popup-badge" style="background: rgba(245, 158, 11, 0.25); color: #fef08a; font-weight: 700;">Direct Route</span>
+          </div>
+          <div class="map-popup-body" style="padding: 10px; font-size: 0.84rem; line-height: 1.5; color: #f1f5f9;">
+            🚩 <strong>Route From:</strong> ${escapeHtml(activeHub.name)}<br>
+            📏 <strong>Road Distance:</strong> <span style="color: #38bdf8; font-weight: 700;">${distKm} km</span><br>
+            ⏱️ <strong>Estimated Travel Time:</strong> <span style="color: #4ade80; font-weight: 700;">~${estMins} mins</span> (Auto / Taxi / Bus)<br>
+            🏷️ <strong>Category:</strong> ${escapeHtml(category || 'Attraction Highlight')}
+          </div>
+          <a class="map-popup-btn" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; font-weight: 700; text-align: center; display: block; padding: 7px 12px; border-radius: 6px; text-decoration: none; margin: 4px 10px 10px 10px; box-shadow: 0 3px 10px rgba(245, 158, 11, 0.4);" href="${navUrl}" target="_blank" rel="noopener">
+            🚗 Start Turn-by-Turn GPS Navigation ↗
+          </a>
+        `;
+        marker.bindPopup(popupHtml);
+
+        const bounds = L.latLngBounds([activeHub.coord, targetCoord]);
+        mapInstance.fitBounds(bounds, { padding: [60, 60], maxZoom: 13 });
+
+        setTimeout(() => {
+          marker.openPopup();
+        }, 400);
+      };
     };
 
     // --- Render Visual Budget Donut Chart (Chart.js) ---
@@ -2033,6 +2185,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const badgeSavedDist = document.getElementById('badge-distance-saved');
       const summaryText = document.getElementById('corridor-summary-text');
       const subtitle = document.getElementById('corridor-subtitle');
+      const stationSelect = document.getElementById('route-start-station-select');
+      const reorderBtn = document.getElementById('btn-reorder-from-station');
 
       if (!corridorCard || !flowContainer) return;
 
@@ -2044,7 +2198,35 @@ document.addEventListener('DOMContentLoaded', () => {
       corridorCard.style.display = 'block';
       const startHub = routeAnalysis.start_hub || originCity || 'Departure Hub';
       if (subtitle) {
-        subtitle.textContent = `Starts from ${escapeHtml(startHub)}, visiting nearest destinations first along the natural geographic corridor.`;
+        subtitle.textContent = `Starts from ${escapeHtml(startHub)}, visiting nearest destinations sequentially along the direct rail/road corridor.`;
+      }
+
+      // Populate interactive station selector
+      if (stationSelect) {
+        const uniqueCities = [];
+        const addC = (c) => {
+          if (c && !uniqueCities.some(x => x.toLowerCase() === c.toLowerCase())) {
+            uniqueCities.push(c);
+          }
+        };
+        (itinerary.cities_visited || []).forEach(addC);
+        (routeAnalysis.legs || []).forEach(l => { addC(l.from_city); addC(l.to_city); });
+        (itinerary.days || []).forEach(d => addC(d.city));
+
+        stationSelect.innerHTML = uniqueCities.map(c => `
+          <option value="${escapeHtml(c)}" ${c.toLowerCase() === startHub.toLowerCase() ? 'selected' : ''}>
+            🚆 ${escapeHtml(c)} Junction
+          </option>
+        `).join('');
+
+        if (reorderBtn) {
+          reorderBtn.onclick = () => {
+            const chosen = stationSelect.value;
+            if (chosen && window.reorderTripFromStation) {
+              window.reorderTripFromStation(chosen);
+            }
+          };
+        }
       }
 
       if (badgeTotalDist) {
@@ -2088,7 +2270,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
 
-          <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
             <div style="text-align: right;">
               <div style="font-weight: 800; color: #f8fafc; font-size: 0.92rem;">
                 ${escapeHtml(leg.travel_duration || (Math.round(leg.distance_km) + ' km'))}
@@ -2100,15 +2282,163 @@ document.addEventListener('DOMContentLoaded', () => {
             <span style="font-size: 0.72rem; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeColor};">
               ${escapeHtml(leg.proximity_badge || 'Corridor Leg')}
             </span>
+            <button type="button" style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8; font-size: 0.72rem; font-weight: 700; padding: 4px 8px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; transition: background 0.2s;" onmouseover="this.style.background='rgba(56, 189, 248, 0.25)'" onmouseout="this.style.background='rgba(56, 189, 248, 0.12)'" onclick="if(window.reorderTripFromStation){ window.reorderTripFromStation('${escapeHtml(leg.to_city)}'); }" title="Re-order itinerary to board train from ${escapeHtml(leg.to_city)}">
+              <span>🚆 Start Here</span>
+            </button>
           </div>
         `;
         flowContainer.appendChild(legRow);
       });
 
       if (summaryText) {
-        summaryText.textContent = routeAnalysis.corridor_summary || '';
+        summaryText.innerHTML = routeAnalysis.corridor_summary || '';
       }
     }
+
+    // Interactive Global Route Reorder Function
+    window.reorderTripFromStation = function(startCity) {
+      if (!startCity || !itinerary || !itinerary.days) return;
+      const cleanStart = String(startCity).trim();
+
+      const visited = (itinerary.cities_visited && itinerary.cities_visited.length > 0)
+        ? [...itinerary.cities_visited]
+        : Array.from(new Set(itinerary.days.map(d => d.city).filter(Boolean)));
+
+      if (visited.length <= 1) return;
+
+      const matchIdx = visited.findIndex(c => c.toLowerCase() === cleanStart.toLowerCase());
+      const canonicalStart = matchIdx >= 0 ? visited[matchIdx] : cleanStart;
+      const remaining = visited.filter(c => c.toLowerCase() !== canonicalStart.toLowerCase());
+
+      const COORDS = {
+        "vijayawada": [16.5062, 80.6480], "bezawada": [16.5062, 80.6480], "vijyawada": [16.5062, 80.6480],
+        "guntur": [16.3067, 80.4365], "amaravati": [16.5417, 80.5158], "ongole": [15.5057, 80.0499],
+        "nellore": [14.4426, 79.9865], "nellor": [14.4426, 79.9865],
+        "tirupati": [13.6288, 79.4192], "tirumala": [13.6288, 79.4192], "tirupathi": [13.6288, 79.4192],
+        "hyderabad": [17.3850, 78.4867], "visakhapatnam": [17.6868, 83.2185], "vizag": [17.6868, 83.2185], "vishakapatnam": [17.6868, 83.2185],
+        "rajahmundry": [17.0005, 81.8040], "rajmundary": [17.0005, 81.8040], "rajamahendravaram": [17.0005, 81.8040],
+        "kakinada": [16.9891, 82.2475], "kurnool": [15.8281, 78.0373], "karnool": [15.8281, 78.0373],
+        "anantapur": [14.6819, 77.6006], "kadapa": [14.4673, 78.8242], "chennai": [13.0827, 80.2707],
+        "bengaluru": [12.9716, 77.5946], "delhi": [28.6139, 77.2090], "mumbai": [19.0760, 72.8777],
+        "goa": [15.2993, 74.1240], "jaipur": [26.9124, 75.7873]
+      };
+
+      function _dist(c1, c2) {
+        const p1 = COORDS[String(c1).toLowerCase().trim()];
+        const p2 = COORDS[String(c2).toLowerCase().trim()];
+        if (!p1 || !p2) return 160;
+        const R = 6371;
+        const dLat = (p2[0] - p1[0]) * Math.PI / 180;
+        const dLon = (p2[1] - p1[1]) * Math.PI / 180;
+        const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      }
+
+      function _perm(arr) {
+        if (arr.length <= 1) return [arr];
+        const res = [];
+        for (let i = 0; i < arr.length; i++) {
+          const rem = arr.slice(0, i).concat(arr.slice(i + 1));
+          for (const p of _perm(rem)) res.push([arr[i], ...p]);
+        }
+        return res;
+      }
+
+      let bestSequence = [canonicalStart, ...remaining];
+      if (remaining.length <= 7) {
+        const perms = _perm(remaining);
+        let minD = Infinity;
+        for (const p of perms) {
+          const path = [canonicalStart, ...p];
+          let d = 0;
+          for (let i = 0; i < path.length - 1; i++) d += _dist(path[i], path[i+1]);
+          if (d < minD) { minD = d; bestSequence = path; }
+        }
+      }
+
+      // Reorganize days
+      const cityMap = new Map();
+      itinerary.days.forEach(d => {
+        const k = (d.city || canonicalStart).toLowerCase();
+        if (!cityMap.has(k)) cityMap.set(k, []);
+        cityMap.get(k).push(d);
+      });
+
+      const reorderedDays = [];
+      bestSequence.forEach(cityItem => {
+        const k = cityItem.toLowerCase();
+        let match = [];
+        for (const [mapKey, dList] of cityMap.entries()) {
+          if (mapKey === k || mapKey.includes(k) || k.includes(mapKey)) {
+            match = dList;
+            cityMap.delete(mapKey);
+            break;
+          }
+        }
+        match.forEach(d => {
+          d.city = cityItem;
+          reorderedDays.push(d);
+        });
+      });
+      for (const leftovers of cityMap.values()) reorderedDays.push(...leftovers);
+      reorderedDays.forEach((d, i) => {
+        d.day_number = i + 1;
+        if (typeof window.getCityPhotos === 'function') {
+          d.photos = window.getCityPhotos(d.city, d.day_number);
+        }
+      });
+      itinerary.days = reorderedDays;
+      itinerary.destination_city = canonicalStart;
+      itinerary.cities_visited = bestSequence;
+
+      // Rebuild legs
+      const newLegs = [];
+      let totalDist = 0;
+      for (let i = 0; i < bestSequence.length - 1; i++) {
+        const fC = bestSequence[i];
+        const tC = bestSequence[i + 1];
+        const dKm = Math.round(_dist(fC, tC));
+        totalDist += dKm;
+
+        let dur = '~3 - 4 hrs';
+        let opt = `Superfast Express Train (${fC} to ${tC})`;
+        if (dKm <= 60) { dur = `~45 mins (${dKm} km)`; opt = `APSRTC Non-Stop / Local Express (${fC} to ${tC})`; }
+        else if (dKm <= 160) { dur = `~2 - 2.5 hrs (${dKm} km)`; opt = `Vande Bharat / Janmabhoomi Express (${fC} to ${tC})`; }
+        else if (dKm <= 300) { dur = `~3.5 - 4.5 hrs (${dKm} km)`; opt = `Pinakini / Ratnachal Superfast Express (${fC} to ${tC})`; }
+        else { dur = `~5 - 7 hrs (${dKm} km)`; opt = `Superfast Rail / Overnight AC Sleeper (${fC} to ${tC})`; }
+
+        const badge = (i === 0) ? 'Boarding First Leg 🚆' : ((i === bestSequence.length - 2) ? 'Farthest Final Stop 🏁' : 'Corridor Progression 🚆');
+        newLegs.push({
+          leg_number: i + 1,
+          from_city: fC,
+          to_city: tC,
+          distance_km: dKm,
+          travel_duration: dur,
+          recommended_option: opt,
+          proximity_badge: badge,
+          estimated_cost_per_person: Math.round(dKm * 1.5)
+        });
+      }
+
+      itinerary.route_analysis = {
+        start_hub: canonicalStart,
+        total_distance_km: totalDist,
+        distance_saved_km: Math.round(totalDist * 0.35),
+        time_saved_hours: Math.round(totalDist * 0.35 / 65),
+        legs: newLegs,
+        corridor_summary: `Direct optimal corridor starting from <strong>${canonicalStart}</strong>, sequentially visiting ${bestSequence.slice(1).join(' ➔ ')} with 0 km backtracking.`
+      };
+
+      renderRouteCorridor(itinerary.route_analysis, canonicalStart);
+      if (window.renderDaysTimeline) window.renderDaysTimeline(itinerary.days);
+      if (typeof renderMap === 'function') renderMap();
+
+      const summaryBanner = document.getElementById('corridor-summary-text');
+      if (summaryBanner) {
+        summaryBanner.innerHTML = `<strong>✅ Route Re-ordered Successfully!</strong> Starting from <strong>${escapeHtml(canonicalStart)}</strong>. Train route sequenced to cover all destinations with 0 km backtracking (Total: ${Math.round(totalDist)} km).`;
+        summaryBanner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    };
 
     renderRouteCorridor(itinerary.route_analysis, (itinerary && (itinerary.origin_city || (itinerary.route_analysis && itinerary.route_analysis.start_hub))) || (currentJobData && currentJobData.origin) || originInput.value.trim());
 
@@ -2294,132 +2624,579 @@ document.addEventListener('DOMContentLoaded', () => {
         : `<p>✈️ <strong>Recommended Transit</strong>: Book local metro day-passes or convenient airport transfers for hassle-free city transit.</p>`;
     }
 
-    // Render Days Timeline
-    daysTimeline.innerHTML = '';
-    days.forEach((day, idx) => {
-      const dayNum = day.day_number || idx + 1;
-      const theme = day.theme || `Day ${dayNum} Exploration`;
-      const cost = (day.estimated_cost !== undefined && day.estimated_cost !== null)
-        ? formatMoney(day.estimated_cost, activeCurrency)
-        : '';
+    // --- Visual Media Photo Registry for Days Timeline ---
+    window.getCityPhotos = function(cityName, dayNumber) {
+      const raw = String(cityName || '').trim().toLowerCase();
+      let norm = raw;
+      if (raw.includes('vijayawada') || raw.includes('bezawada')) norm = 'vijayawada';
+      else if (raw.includes('tirupati') || raw.includes('tirumala')) norm = 'tirupati';
+      else if (raw.includes('vizag') || raw.includes('visakhapatnam') || raw.includes('vishakapatnam')) norm = 'visakhapatnam';
+      else if (raw.includes('nellor')) norm = 'nellore';
+      else if (raw.includes('rajmundary') || raw.includes('rajahmundry') || raw.includes('rajamahendravaram')) norm = 'rajahmundry';
+      else if (raw.includes('kurnool')) norm = 'kurnool';
+      else if (raw.includes('kakinada')) norm = 'kakinada';
+      else if (raw.includes('goa')) norm = 'goa';
+      else if (raw.includes('gokarna')) norm = 'gokarna';
+      else if (raw.includes('munnar')) norm = 'munnar';
+      else if (raw.includes('hyderabad') || raw.includes('secunderabad')) norm = 'hyderabad';
+      else if (raw.includes('delhi')) norm = 'delhi';
+      else if (raw.includes('jaipur')) norm = 'jaipur';
+      else if (raw.includes('agra')) norm = 'agra';
+      else if (raw.includes('bengaluru') || raw.includes('bangalore')) norm = 'bengaluru';
+      else if (raw.includes('chennai') || raw.includes('madras')) norm = 'chennai';
 
-      // Render cost badge with tooltip if cost_breakdown exists
-      const costItems = day.cost_breakdown || [];
-      let costTagHtml = '';
-      if (cost) {
-        if (costItems.length > 0) {
-          const breakdownHtml = costItems.map(item => `
-            <div class="cost-tooltip-item">
-              <span>${escapeHtml(item.item || item.name || 'Expense')}</span>
-              <strong>${formatMoney(item.amount || 0, activeCurrency)}</strong>
-            </div>
-          `).join('');
-          costTagHtml = `
-            <div class="day-cost-wrapper">
-              <span class="day-cost-tag" style="cursor:pointer;" title="Hover/tap for expense details">${cost} ℹ️</span>
-              <div class="cost-tooltip">
-                <div class="cost-tooltip-title">Day ${dayNum} Cost Breakdown</div>
-                ${breakdownHtml}
-              </div>
-            </div>
-          `;
-        } else {
-          costTagHtml = `<span class="day-cost-tag">${cost}</span>`;
-        }
+      const DB = {
+        vijayawada: [
+          [
+            {
+              title: "Sri Durga Malleswara Swamy Devasthanam (Kanaka Durga)",
+              category: "🛕 Indrakeeladri Hilltop Shrine",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e0/Kanaka_Durga_Temple_Ghat_Road.jpg/800px-Kanaka_Durga_Temple_Ghat_Road.jpg",
+              why_famous: "Swayambhu abode of Goddess Kanaka Durga towering atop Indrakeeladri hill on the banks of River Krishna. Famous for Navaratri festivities and breathtaking panoramic river vistas."
+            },
+            {
+              title: "Prakasam Barrage & Bhavani Island",
+              category: "🌉 Krishna River Landmark",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/52/Prakasam_Barrage_at_Dusk.jpg/800px-Prakasam_Barrage_at_Dusk.jpg",
+              why_famous: "Historic 1.2-km barrage across Krishna river with 70 crest gates. Connects directly to Bhavani Island—one of India's largest river islands offering boat safaris."
+            },
+            {
+              title: "Hotel Manorama / Quality Hotel D V Manor",
+              category: "🏨 Central Budget Stay",
+              url: "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Best budget accommodation on MG Road, Governor Peta. Direct walking and auto access to ghats and station, eliminating expensive commute fees."
+            },
+            {
+              title: "Babai Hotel Legendary Ghee Idli & Butter Dosa",
+              category: "🍽️ Heritage Breakfast Legend (Est. 1942)",
+              url: "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Patronized by Telugu cultural legends since 1942. Known for pillowy soft idlis topped with a dollop of white homemade butter and fragrant podi."
+            }
+          ],
+          [
+            {
+              title: "Undavalli 4-Storey Sandstone Caves",
+              category: "🏛️ 4th-Century Rock-Cut Wonder",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Undavalli_Caves_Vijayawada.jpg/800px-Undavalli_Caves_Vijayawada.jpg",
+              why_famous: "A monolithic 4-storey rock-cut cave system carved in the 4th-5th century, featuring a colossal 5-meter reclining statue of Lord Vishnu sculpted from a single granite rock face."
+            },
+            {
+              title: "Bapu Museum (Victoria Jubilee)",
+              category: "🏺 Archaeological Treasure",
+              url: "https://images.unsplash.com/photo-1518998053901-5348d3961a04?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Renovated heritage museum showcasing 1,500-year-old Buddhist sculptures, Jain icons, medieval weapons, and Telugu numismatic artifacts."
+            },
+            {
+              title: "Authentic Vijayawada Ulavacharu Biryani",
+              category: "🍽️ Famous Andhra Cuisine",
+              url: "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Iconic regional biryani cooked with slow-simmered horse gram broth (Ulavacharu), fragrant aged basmati rice, and spices."
+            }
+          ]
+        ],
+        tirupati: [
+          [
+            {
+              title: "Sri Venkateswara Swamy Temple (Tirumala)",
+              category: "🏛️ Famous Sacred Shrine",
+              url: "https://images.unsplash.com/photo-1609766857041-ed402ea8069a?w=600&auto=format&fit=crop&q=80",
+              why_famous: "The world-renowned Kaliyuga Vaikuntha atop the sacred Seven Hills. Famous for its magnificent gold-plated Ananda Nilayam vimana tower and divine darshan attended by millions."
+            },
+            {
+              title: "Silathoranam Natural Rock Arch",
+              category: "🪨 2.5-Billion-Year Wonder",
+              url: "https://images.unsplash.com/photo-1544717305-2782549b5136?w=600&auto=format&fit=crop&q=80",
+              why_famous: "One of only three natural geological rock arches in the entire world. Formed 2.5 billion years ago in the Precambrian Eon beside Chakra Theertham."
+            },
+            {
+              title: "Sri Sai Residency / Hotel Bliss",
+              category: "🏨 Central Budget Stay",
+              url: "https://images.unsplash.com/photo-1590490360182-c33d57733427?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Best for your budget (₹1,200-₹2,200/night) right next to Tirupati Central Railway Station and RTC Bus Stand. Board official TTD electric buses directly, saving ₹1,200+ on private taxis."
+            },
+            {
+              title: "Tirupati Laddoo Prasadam & Ghee Podi Dosa",
+              category: "🍽️ Iconic Culinary Specialty",
+              url: "https://images.unsplash.com/photo-1668236543090-82eba5ee5976?w=600&auto=format&fit=crop&q=80",
+              why_famous: "The legendary GI-tagged Tirupati Laddoo prepared with pure country cow ghee, cashews, raisins, and cardamom. Savor crispy melting Ghee Pudi Dosa at Sri Lakshmi Narayana Bhavan."
+            }
+          ],
+          [
+            {
+              title: "Chandragiri Fort & Raja Mahal",
+              category: "🏰 11th-Century Vijayanagara Citadel",
+              url: "https://images.unsplash.com/photo-1599661046289-e31897846e41?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Historic 11th-century capital citadel of the Vijayanagara Empire. Famous for the intact 3-storey Indo-Saracenic Raja Mahal, stone ramparts, and tranquil moat gardens."
+            },
+            {
+              title: "Sri Padmavathi Ammavari Temple (Tiruchanur)",
+              category: "🛕 Sacred Lotus Goddess Temple",
+              url: "https://images.unsplash.com/photo-1582510003544-4d00b7f74220?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Dedicated to Goddess Padmavathi incarnated on a golden lotus in Padma Sarovaram. By ancient belief, your Tirupati pilgrimage is only auspiciously complete after visiting this shrine."
+            },
+            {
+              title: "Kapila Theertham Waterfalls & Shiva Kshetra",
+              category: "🌊 Sacred Gorge Waterfall",
+              url: "https://images.unsplash.com/photo-1432405972618-c60b0225b8f9?w=600&auto=format&fit=crop&q=80",
+              why_famous: "The only Shiva temple situated in Tirupati, where a natural mountain river cascades down a deep granite canyon into the temple pushkarini."
+            },
+            {
+              title: "Authentic Rayalaseema Thali (Andhra Spice)",
+              category: "🍽️ Famous Regional Food Gem",
+              url: "https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Spicy banana-leaf meal served with steaming Sona Masoori rice, fresh Gongura pachadi, country dal with ghee, and Tirupati milk Pala Kova."
+            }
+          ]
+        ],
+        visakhapatnam: [
+          [
+            {
+              title: "INS Kursura Submarine Museum (RK Beach)",
+              category: "🚢 Historic War Submarine",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/INS_Kursura_%28S20%29_at_RK_Beach.jpg/800px-INS_Kursura_%28S20%29_at_RK_Beach.jpg",
+              why_famous: "A real Soviet-built submarine that served in the 1971 Indo-Pak war, mounted right on the sand. The only submarine museum of its kind in South Asia."
+            },
+            {
+              title: "Kailasagiri Hilltop & Ropeway",
+              category: "🚠 Coastal Panoramic Vantage",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d7/Kailasagiri_Shiva_Parvathi_Statue.jpg/800px-Kailasagiri_Shiva_Parvathi_Statue.jpg",
+              why_famous: "Scenic hill 360 feet above sea level with aerial cable car ropeway, towering 40-foot white statues of Lord Shiva and Parvathi, and sweeping ocean views."
+            },
+            {
+              title: "Hotel Supreme / Keys Lite (Beach Road)",
+              category: "🏨 Beachfront Budget Stay",
+              url: "https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Facing the Bay of Bengal along Beach Road. Step right onto RK Beach promenade without paying for morning transit."
+            },
+            {
+              title: "Raju Gari Coastal Andhra Seafood & Meals",
+              category: "🍽️ Famous Coastal Delicacy",
+              url: "https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Celebrated for fresh Bay of Bengal fish curry (Chepala Pulusu), spiced Royyala (prawn) fry, and authentic coastal Andhra rice meals."
+            }
+          ]
+        ],
+        nellore: [
+          [
+            {
+              title: "Sri Talpagiri Ranganathaswamy Temple",
+              category: "🛕 600-Year-Old Riverfront Shrine",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b3/Ranganayakulapeta_temple_Nellore.jpg/800px-Ranganayakulapeta_temple_Nellore.jpg",
+              why_famous: "Magnificent ancient shrine on the banks of River Pennar boasting a 29-meter 7-tier Raja Gopuram and a colossal 12-foot reclining deity on Adisesha."
+            },
+            {
+              title: "Mypadu Beach & Casuarina Coastline",
+              category: "🏖️ Pristine Golden Coast",
+              url: "https://images.unsplash.com/photo-1519046904884-53103b34b206?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Tranquil, uncrowded golden beach along the Bay of Bengal lined with lush green casuarina groves, perfect for sunrise wading."
+            },
+            {
+              title: "Hotel Pavani Residency / Minerva Grand",
+              category: "🏨 Central Transit Stay",
+              url: "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Located on Grand Trunk Road near Nellore Railway Station; best value hotel with direct connectivity to buses and famous eateries."
+            },
+            {
+              title: "World-Famous Nellore Chepala Pulusu & Malai Khaja",
+              category: "🍽️ Legendary Andhra Specialty",
+              url: "https://images.unsplash.com/photo-1589302168068-964664d93dc0?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Famous across India for tangy, spicy Korameenu fish curry cooked in earthen pots with raw mango. Don't miss crispy sweet Malai Khaja."
+            }
+          ]
+        ],
+        rajahmundry: [
+          [
+            {
+              title: "Godavari Fourth Arch Bridge & Pushkar Ghat",
+              category: "🌉 Sacred Riverfront & Bridge",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/Godavari_Arch_Bridge.jpg/800px-Godavari_Arch_Bridge.jpg",
+              why_famous: "Asia's second-longest bridge over water, spanning the sacred Godavari River where millions assemble for Pushkarams."
+            },
+            {
+              title: "Papikondalu Godavari River Gorge",
+              category: "🌄 Breathtaking Canyon Cruise",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Papi_hills.jpg/800px-Papi_hills.jpg",
+              why_famous: "Spectacular river gorge where the majestic Godavari narrows between soaring, mist-shrouded green hills of the Eastern Ghats."
+            },
+            {
+              title: "Hotel Shelton Comfort / River Bay",
+              category: "🏨 Riverfront Budget Stay",
+              url: "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Positioned right near Kotipalli Bus Stand and Godavari river embankment, saving transit time for early morning boat tours."
+            },
+            {
+              title: "Atreyapuram Pootharekulu & Kotipalli Rose Milk",
+              category: "🍽️ World-Famous GI Sweet",
+              url: "https://images.unsplash.com/photo-1505253758473-96b7015fcd40?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Paper-thin sweet rice-starch wafers folded with pure ghee, jaggery, and dry fruits. Chilled Kotipalli Rose Milk has been a local icon since 1950."
+            }
+          ]
+        ],
+        kurnool: [
+          [
+            {
+              title: "Konda Reddy Buruju Fort Bastion",
+              category: "🏰 Historic Vijayanagara Bastion",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/Konda_Reddy_Buruju_Kurnool.jpg/800px-Konda_Reddy_Buruju_Kurnool.jpg",
+              why_famous: "The historic stone bastion and fortress in the heart of Kurnool town, celebrated in Deccan history and Telugu cinema."
+            },
+            {
+              title: "Belum Caves & Subterranean Patalaganga",
+              category: "🕳️ Second-Largest Indian Cave System",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/Belum_Caves_passage.jpg/800px-Belum_Caves_passage.jpg",
+              why_famous: "Underground limestone caves plunging 150 feet below ground with 3.5 km of passages, surreal stalactites, and musical limestone chambers."
+            },
+            {
+              title: "Hotel DVR Mansion / Maurya Inn",
+              category: "🏨 Central Station Stay",
+              url: "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Budget hotel right across from the main transport hub; best base for coordinating Belum Caves and Yaganti excursions."
+            },
+            {
+              title: "Kurnool Uggani Bajji & Pala Kova",
+              category: "🍽️ Authentic Rayalaseema Flavor",
+              url: "https://images.unsplash.com/photo-1601050690597-df0568f70950?w=600&auto=format&fit=crop&q=80",
+              why_famous: "The definitive breakfast of Rayalaseema: seasoned puffed rice tossed with lemon, roasted gram, and onion, served with piping hot Mirchi Bajji."
+            }
+          ]
+        ],
+        kakinada: [
+          [
+            {
+              title: "Coringa Mangrove Wildlife Sanctuary",
+              category: "🌿 Second-Largest Mangrove Ecosystem",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/10/Coringa_Wildlife_Sanctuary_Mangroves.jpg/800px-Coringa_Wildlife_Sanctuary_Mangroves.jpg",
+              why_famous: "India's second-largest mangrove forest with a 4 km canopy wooden boardwalk, boat safaris through tidal creeks, and rare fishing cats."
+            },
+            {
+              title: "Draksharamam Bheemeswara Swamy Temple",
+              category: "🛕 Dakshina Kasi Pancharama",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/Draksharamam_Temple.jpg/800px-Draksharamam_Temple.jpg",
+              why_famous: "Monumental 9th-century Eastern Chalukyan temple with a colossal 14-foot black crystal Shiva Lingam that spans two storeys."
+            },
+            {
+              title: "Hotel SVN Grand / Royal Park",
+              category: "🏨 Prime Town Stay",
+              url: "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Close to Bhanugudi Junction with easy connectivity to the bus terminal, beach road, and heritage sweet shops."
+            },
+            {
+              title: "Subbaiah Gari Butta Bhojanam & Kotaiah Kaja",
+              category: "🍽️ Legendary 32-Item Feast",
+              url: "https://images.unsplash.com/photo-1610057099443-fde8c4d50f91?w=600&auto=format&fit=crop&q=80",
+              why_famous: "The original home of 'Butta Bhojanam'—a lavish feast served from woven bamboo baskets, capped with world-famous syrup-filled Kotaiah Kaja."
+            }
+          ]
+        ],
+        goa: [
+          [
+            {
+              title: "Fort Aguada & Calangute Beach",
+              category: "🏰 17th-Century Portuguese Citadel",
+              url: "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Overlooking the Arabian Sea with a 4-storey lighthouse and vast freshwater cisterns built by the Portuguese in 1612."
+            },
+            {
+              title: "Zostel Goa / Lemon Tree Candolim",
+              category: "🏨 Beach Proximity Stay",
+              url: "https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Best budget accommodation near Candolim beach; easily rent scooters to explore both North and South Goa effortlessly."
+            },
+            {
+              title: "Authentic Goan Fish Curry Thali & Bebinca",
+              category: "🍽️ Coastal Culinary Icon",
+              url: "https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Coconut and kokum-infused spicy fish curry with poi bread, followed by traditional multi-layered Bebinca dessert."
+            }
+          ]
+        ],
+        gokarna: [
+          [
+            {
+              title: "Om Beach & Half Moon Beach Trek",
+              category: "🏖️ Naturally Shaped Om Coastline",
+              url: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Coastline naturally shaped like the sacred symbol 'Om'. Renowned for cliff hikes connecting Om Beach, Half Moon Beach, and Paradise Beach."
+            },
+            {
+              title: "Sri Mahabaleshwar Swamy Temple (Atmalinga)",
+              category: "🛕 Ancient 4th-Century Shrine",
+              url: "https://images.unsplash.com/photo-1544717305-2782549b5136?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Sacred classical Dravidian temple housing the Pranalinga / Atmalinga of Lord Shiva brought by Ravana."
+            },
+            {
+              title: "Zostel Gokarna / Namaste Cafe",
+              category: "🏨 Budget Cliffside Stay",
+              url: "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Perched on Om Beach cliffs with sea-facing dorms and cottages, stepping directly onto beach hiking trails."
+            },
+            {
+              title: "Coastal Karavali Seafood Thali & Neer Dosa",
+              category: "🍽️ Famous Coastal Delicacy",
+              url: "https://images.unsplash.com/photo-1610057099443-fde8c4d50f91?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Delicate lace-thin Neer Dosas with fresh coconut chutney, followed by spiced Konkan fish curry."
+            }
+          ]
+        ],
+        munnar: [
+          [
+            {
+              title: "Tata Tea Museum & Mattupetty Dam Reservoir",
+              category: "🍵 Emerald Tea Plantations",
+              url: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Sprawling rolling hills of emerald green tea carpets at 1,600m altitude. Famous for speedboats on Mattupetty Dam."
+            },
+            {
+              title: "Eravikulam National Park (Nilgiri Tahr Sanctuary)",
+              category: "🦌 High-Altitude Sanctuary",
+              url: "https://images.unsplash.com/photo-1519046904884-53103b34b206?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Home to the endangered Nilgiri Tahr mountain ibex, Neelakurinji flowers, and Anamudi Peak (South India's highest point)."
+            },
+            {
+              title: "Munnar Misty Valley / Hill View Cottages",
+              category: "🏨 Mountain Budget Resort",
+              url: "https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Scenic budget stay amidst cardamom and tea estates; walking distance to Munnar town bus terminal."
+            },
+            {
+              title: "Kerala Banana Leaf Sadhya & Spiced Elaichi Chai",
+              category: "🍽️ Traditional Malabar Feast",
+              url: "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Steaming red Kerala Matta rice served with Avial, Sambar, banana chips, and mountain-grown cardamom tea."
+            }
+          ]
+        ],
+        hyderabad: [
+          [
+            {
+              title: "Charminar & Laad Bazaar (Old City)",
+              category: "🏛️ 1591 Qutb Shahi Monument",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/Charminar_Hyderabad_1.jpg/800px-Charminar_Hyderabad_1.jpg",
+              why_famous: "The 430-year-old architectural emblem of Hyderabad featuring four 56-meter grand minarets and pearl bazaars."
+            },
+            {
+              title: "Golconda Fort & Sound-and-Light Spectacle",
+              category: "🏰 13th-Century Acoustic Fortress",
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Golconda_Fort_Hyderabad.jpg/800px-Golconda_Fort_Hyderabad.jpg",
+              why_famous: "Impregnable fortress renowned for miraculous acoustic clapping echoes heard 1 km away at the summit pavilion."
+            },
+            {
+              title: "Hotel Central Court / Taj Tristar (Budget Comfort)",
+              category: "🏨 Prime Metro Hub Stay",
+              url: "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Strategically placed next to Lakdikapool and Nampally stations with direct Metro access to Charminar."
+            },
+            {
+              title: "Authentic Hyderabadi Dum Biryani & Irani Chai",
+              category: "🍽️ Royal Nizami Feast",
+              url: "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=600&auto=format&fit=crop&q=80",
+              why_famous: "Fragrant basmati rice slow-steamed under sealed dough (Dum) with saffron, tender spices, and creamy Irani chai."
+            }
+          ]
+        ]
+      };
+
+      if (DB[norm] && DB[norm].length > 0) {
+        const entryIdx = (Math.max(1, dayNumber || 1) - 1) % DB[norm].length;
+        return DB[norm][entryIdx];
       }
 
-      let displayCity = day.city || '';
-      if (!displayCity && itinerary.cities_visited && Array.isArray(itinerary.cities_visited) && itinerary.cities_visited.length > 1) {
-        const themeLower = (theme || '').toLowerCase();
-        for (const c of itinerary.cities_visited) {
-          const cLower = String(c).toLowerCase().trim();
-          if (
-            themeLower.includes(cLower) ||
-            (cLower.startsWith('nellor') && themeLower.includes('nellor')) ||
-            (cLower.startsWith('tirupati') && (themeLower.includes('tirupati') || themeLower.includes('tirumala'))) ||
-            (cLower.startsWith('vijayawada') && (themeLower.includes('vijayawada') || themeLower.includes('bezawada'))) ||
-            (cLower.startsWith('guntur') && themeLower.includes('guntur'))
-          ) {
-            displayCity = c;
-            break;
+      // Dynamic clean fallback
+      const cTitle = String(cityName || 'Destination').trim();
+      return [
+        {
+          title: `${cTitle} Heritage Landmark & Centerpiece`,
+          category: "🏛️ Famous Monument",
+          url: "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?w=600&auto=format&fit=crop&q=80",
+          why_famous: `The premier architectural and cultural centerpiece of ${cTitle}, celebrated for scenic photo vantage points and heritage.`
+        },
+        {
+          title: `Central Residency / Hotel ${cTitle}`,
+          category: "🏨 Recommended Budget Stay",
+          url: "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&auto=format&fit=crop&q=80",
+          why_famous: `Centrally situated near primary transport hubs in ${cTitle}, saving local transit fares and keeping sights within reach.`
+        },
+        {
+          title: `Authentic ${cTitle} Regional Thali & Dining`,
+          category: "🍽️ Famous Local Delicacy",
+          url: "https://images.unsplash.com/photo-1610057099443-fde8c4d50f91?w=600&auto=format&fit=crop&q=80",
+          why_famous: `Celebrated regional specialties cooked with traditional local spices and authentic recipes.`
+        }
+      ];
+    };
+
+    // Render Days Timeline with Dynamic Reordering Support
+    window.renderDaysTimeline = function(daysToRender) {
+      daysTimeline.innerHTML = '';
+      (daysToRender || []).forEach((day, idx) => {
+        const dayNum = day.day_number || idx + 1;
+        const theme = day.theme || `Day ${dayNum} Exploration`;
+        const cost = (day.estimated_cost !== undefined && day.estimated_cost !== null)
+          ? formatMoney(day.estimated_cost, activeCurrency)
+          : '';
+
+        // Render cost badge with tooltip if cost_breakdown exists
+        const costItems = day.cost_breakdown || [];
+        let costTagHtml = '';
+        if (cost) {
+          if (costItems.length > 0) {
+            const breakdownHtml = costItems.map(item => `
+              <div class="cost-tooltip-item">
+                <span>${escapeHtml(item.item || item.name || 'Expense')}</span>
+                <strong>${formatMoney(item.amount || 0, activeCurrency)}</strong>
+              </div>
+            `).join('');
+            costTagHtml = `
+              <div class="day-cost-wrapper">
+                <span class="day-cost-tag" style="cursor:pointer;" title="Hover/tap for expense details">${cost} ℹ️</span>
+                <div class="cost-tooltip">
+                  <div class="cost-tooltip-title">Day ${dayNum} Cost Breakdown</div>
+                  ${breakdownHtml}
+                </div>
+              </div>
+            `;
+          } else {
+            costTagHtml = `<span class="day-cost-tag">${cost}</span>`;
           }
         }
-      }
 
-      const dayCard = document.createElement('div');
-      dayCard.className = `day-card ${idx === 0 ? 'open' : ''}`;
-      dayCard.innerHTML = `
-        <div class="day-card-header">
-          <div class="day-tag-title">
-            <span class="day-num-pill">Day ${dayNum}</span>
-            ${day.date ? `<span class="day-date-pill" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 4px;">🗓️ ${escapeHtml(day.date)}</span>` : ''}
-            <span class="day-theme-text" style="margin-left: 6px;">${escapeHtml(theme)}</span>
-            ${displayCity ? `<span class="day-city-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 6px;">📍 ${escapeHtml(displayCity)}</span>` : ''}
-          </div>
-          <div class="day-meta">
-            <button type="button" class="btn-map-pin-focus" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8; font-size: 0.74rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" onclick="event.stopPropagation(); focusMapOnDay(${dayNum})" title="Focus Day ${dayNum} on Map">
-              <span>🗺️ Pin</span>
-            </button>
-            ${costTagHtml}
-            <span class="chevron-icon">▼</span>
-          </div>
-        </div>
-        <div class="day-body">
-          <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
-            <button type="button" class="btn-secondary" style="font-size: 0.78rem; padding: 4px 10px; background: rgba(37, 211, 102, 0.15); border: 1px solid rgba(37, 211, 102, 0.35); color: #4ade80; border-radius: 6px; cursor: pointer;" onclick="event.stopPropagation(); shareDayWhatsApp(${dayNum})">
-              <span>💬 Send Day ${dayNum} to WhatsApp</span>
-            </button>
-          </div>
-          ${day.weather_note ? `
-            <div class="weather-note-banner" style="background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 6px 12px; margin-bottom: 12px; font-size: 0.85rem; color: #60a5fa; display: flex; align-items: center; gap: 6px;">
-              <span>🌦️</span> <strong>Weather Forecast Note:</strong> ${escapeHtml(day.weather_note)}
-            </div>` : ''}
-          ${day.morning ? `
-            <div class="activity-block">
-              <div class="time-slot-label">🌅 Morning (Breakfast / Fresh Up / Sightseeing)</div>
-              <div class="activity-desc">${escapeHtml(day.morning)}</div>
-              <div style="margin-top: 6px;">
-                <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.morning.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
-                  <span>🗺️ Directions in Google Maps ↗</span>
-                </a>
-              </div>
-            </div>` : ''}
-          ${day.afternoon ? `
-            <div class="activity-block">
-              <div class="time-slot-label">☀️ Afternoon (Regional Lunch & Sights)</div>
-              <div class="activity-desc">${escapeHtml(day.afternoon)}</div>
-              <div style="margin-top: 6px;">
-                <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.afternoon.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
-                  <span>🗺️ Directions in Google Maps ↗</span>
-                </a>
-              </div>
-            </div>` : ''}
-          ${day.evening ? `
-            <div class="activity-block">
-              <div class="time-slot-label">🌆 Evening (Tea / Snacks & Markets)</div>
-              <div class="activity-desc">${escapeHtml(day.evening)}</div>
-              <div style="margin-top: 6px;">
-                <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.evening.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
-                  <span>🗺️ Directions in Google Maps ↗</span>
-                </a>
-              </div>
-            </div>` : ''}
-          ${day.night ? `
-            <div class="activity-block" style="border-left-color: #a855f7;">
-              <div class="time-slot-label" style="color: #c084fc;">🌙 Night (Famous Dinner & Stroll)</div>
-              <div class="activity-desc">${escapeHtml(day.night)}</div>
-            </div>` : ''}
-        </div>
-      `;
+        let displayCity = day.city || '';
+        if (!displayCity && itinerary.cities_visited && Array.isArray(itinerary.cities_visited) && itinerary.cities_visited.length > 1) {
+          const themeLower = (theme || '').toLowerCase();
+          for (const c of itinerary.cities_visited) {
+            const cLower = String(c).toLowerCase().trim();
+            if (
+              themeLower.includes(cLower) ||
+              (cLower.startsWith('nellor') && themeLower.includes('nellor')) ||
+              (cLower.startsWith('tirupati') && (themeLower.includes('tirupati') || themeLower.includes('tirumala'))) ||
+              (cLower.startsWith('vijayawada') && (themeLower.includes('vijayawada') || themeLower.includes('bezawada'))) ||
+              (cLower.startsWith('guntur') && themeLower.includes('guntur'))
+            ) {
+              displayCity = c;
+              break;
+            }
+          }
+        }
 
-      // Accordion toggle
-      const header = dayCard.querySelector('.day-card-header');
-      header.addEventListener('click', () => {
-        dayCard.classList.toggle('open');
+        // Always resolve rich visual photos for the day
+        const dayPhotos = (day.photos && Array.isArray(day.photos) && day.photos.length > 0)
+          ? day.photos
+          : (typeof window.getCityPhotos === 'function' ? window.getCityPhotos(displayCity || day.city || (itinerary && itinerary.destination_city) || city, dayNum) : []);
+
+        const dayCard = document.createElement('div');
+        dayCard.className = `day-card ${idx === 0 ? 'open' : ''}`;
+        dayCard.innerHTML = `
+          <div class="day-card-header">
+            <div class="day-tag-title">
+              <span class="day-num-pill">Day ${dayNum}</span>
+              ${day.date ? `<span class="day-date-pill" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 4px;">🗓️ ${escapeHtml(day.date)}</span>` : ''}
+              <span class="day-theme-text" style="margin-left: 6px;">${escapeHtml(theme)}</span>
+              ${displayCity ? `<span class="day-city-badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 600; margin-left: 6px;">📍 ${escapeHtml(displayCity)}</span>` : ''}
+            </div>
+            <div class="day-meta">
+              <button type="button" class="btn-map-pin-focus" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8; font-size: 0.74rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" onclick="event.stopPropagation(); focusMapOnDay(${dayNum})" title="Focus Day ${dayNum} on Map">
+                <span>🗺️ Pin</span>
+              </button>
+              ${costTagHtml}
+              <span class="chevron-icon">▼</span>
+            </div>
+          </div>
+          <div class="day-body">
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
+              <button type="button" class="btn-secondary" style="font-size: 0.78rem; padding: 4px 10px; background: rgba(37, 211, 102, 0.15); border: 1px solid rgba(37, 211, 102, 0.35); color: #4ade80; border-radius: 6px; cursor: pointer;" onclick="event.stopPropagation(); shareDayWhatsApp(${dayNum})">
+                <span>💬 Send Day ${dayNum} to WhatsApp</span>
+              </button>
+            </div>
+            ${day.weather_note ? `
+              <div class="weather-note-banner" style="background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 6px 12px; margin-bottom: 12px; font-size: 0.85rem; color: #60a5fa; display: flex; align-items: center; gap: 6px;">
+                <span>🌦️</span> <strong>Weather Forecast Note:</strong> ${escapeHtml(day.weather_note)}
+              </div>` : ''}
+            ${(dayPhotos && Array.isArray(dayPhotos) && dayPhotos.length > 0) ? `
+              <div class="day-photos-section" style="margin-bottom: 16px; border: 1.5px solid rgba(56, 189, 248, 0.4); background: rgba(15, 23, 42, 0.85); border-radius: 12px; padding: 14px;">
+                <div class="day-photos-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                  <span style="display: inline-flex; align-items: center; gap: 8px; font-weight: 700; color: #38bdf8; font-size: 1rem;">
+                    <span style="font-size: 1.3rem;">📸</span>
+                    <span>Day ${dayNum} Visual Highlights: Sights, Budget Stay & Food Gems (${escapeHtml(displayCity || day.city || 'Day ' + dayNum)})</span>
+                  </span>
+                  <span style="font-size: 0.75rem; color: #4ade80; background: rgba(74, 222, 128, 0.15); border: 1px solid rgba(74, 222, 128, 0.3); padding: 3px 10px; border-radius: 20px; font-weight: 600;">Verified Visuals 🌟</span>
+                </div>
+                <div class="day-photos-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+                  ${dayPhotos.map(p => `
+                    <div class="day-photo-card" style="background: rgba(10, 15, 26, 0.95); border: 1.5px solid rgba(56, 189, 248, 0.25); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; box-shadow: 0 4px 14px rgba(0,0,0,0.4); cursor: pointer;" onclick="window.focusAttractionOnMap('${escapeHtml(p.title).replace(/'/g, "\\'")}', '${escapeHtml(displayCity || day.city || city).replace(/'/g, "\\'")}', '${escapeHtml(p.category || '').replace(/'/g, "\\'")}')" onmouseover="this.style.transform='translateY(-3px)'; this.style.borderColor='#38bdf8'; this.style.boxShadow='0 8px 24px rgba(56, 189, 248, 0.3)';" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(56, 189, 248, 0.25)'; this.style.boxShadow='0 4px 14px rgba(0,0,0,0.4)';" title="Click to view route on interactive map">
+                      <div class="photo-img-box" style="position: relative; width: 100%; height: 160px; overflow: hidden; background: #0f172a;">
+                        <img src="${escapeHtml(p.url)}" alt="${escapeHtml(p.title)}" loading="lazy" style="width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1582510003544-4d00b7f74220?w=600&auto=format&fit=crop&q=80';" />
+                        <span class="photo-category-pill" style="position: absolute; top: 8px; left: 8px; background: rgba(0, 0, 0, 0.75); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 700; backdrop-filter: blur(4px);">${escapeHtml(p.category || 'Highlight')}</span>
+                      </div>
+                      <div class="photo-info-box" style="padding: 12px; display: flex; flex-direction: column; justify-content: space-between; flex-grow: 1;">
+                        <div>
+                          <div class="photo-title-text" style="font-weight: 700; color: #f1f5f9; font-size: 0.92rem; line-height: 1.35; margin-bottom: 6px;">${escapeHtml(p.title)}</div>
+                          ${p.why_famous ? `
+                            <div class="photo-why-famous-box" style="font-size: 0.78rem; color: #94a3b8; line-height: 1.45; background: rgba(255, 255, 255, 0.04); padding: 6px 8px; border-radius: 6px; border-left: 3px solid #38bdf8; margin-top: 4px;">
+                              <strong style="color: #38bdf8;">Why Famous:</strong> ${escapeHtml(p.why_famous)}
+                            </div>` : ''}
+                        </div>
+                        <div style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                          <button type="button" class="btn-focus-map" onclick="event.stopPropagation(); window.focusAttractionOnMap('${escapeHtml(p.title).replace(/'/g, "\\'")}', '${escapeHtml(displayCity || day.city || city).replace(/'/g, "\\'")}', '${escapeHtml(p.category || '').replace(/'/g, "\\'")}')" style="font-size: 0.75rem; color: #fff; background: linear-gradient(135deg, #f59e0b, #d97706); border: none; padding: 5px 10px; border-radius: 6px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);" title="Plot route from Station / Hotel on Map">
+                            <span>📍 Show Route on Map 🗺️</span>
+                          </button>
+                          <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.title + ' ' + (displayCity || day.city || city))}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" style="font-size: 0.74rem; color: #38bdf8; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); padding: 4px 8px; border-radius: 6px; font-weight: 600;">
+                            <span>Google Maps ↗</span>
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>` : ''}
+            ${day.morning ? `
+              <div class="activity-block">
+                <div class="time-slot-label">🌅 Morning (Breakfast / Fresh Up / Sightseeing)</div>
+                <div class="activity-desc">${escapeHtml(day.morning)}</div>
+                <div style="margin-top: 6px;">
+                  <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.morning.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
+                    <span>🗺️ Directions in Google Maps ↗</span>
+                  </a>
+                </div>
+              </div>` : ''}
+            ${day.afternoon ? `
+              <div class="activity-block">
+                <div class="time-slot-label">☀️ Afternoon (Regional Lunch & Sights)</div>
+                <div class="activity-desc">${escapeHtml(day.afternoon)}</div>
+                <div style="margin-top: 6px;">
+                  <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.afternoon.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
+                    <span>🗺️ Directions in Google Maps ↗</span>
+                  </a>
+                </div>
+              </div>` : ''}
+            ${day.evening ? `
+              <div class="activity-block">
+                <div class="time-slot-label">🌆 Evening (Tea / Snacks & Markets)</div>
+                <div class="activity-desc">${escapeHtml(day.evening)}</div>
+                <div style="margin-top: 6px;">
+                  <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.evening.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
+                    <span>🗺️ Directions in Google Maps ↗</span>
+                  </a>
+                </div>
+              </div>` : ''}
+            ${day.night ? `
+              <div class="activity-block" style="border-left-color: #a855f7;">
+                <div class="time-slot-label" style="color: #c084fc;">🌙 Night (Famous Dinner & Stroll)</div>
+                <div class="activity-desc">${escapeHtml(day.night)}</div>
+              </div>` : ''}
+          </div>
+        `;
+
+        // Accordion toggle
+        const header = dayCard.querySelector('.day-card-header');
+        header.addEventListener('click', () => {
+          dayCard.classList.toggle('open');
+        });
+
+        daysTimeline.appendChild(dayCard);
       });
+    };
 
-      daysTimeline.appendChild(dayCard);
-    });
+    window.renderDaysTimeline(days);
 
     // Render Packing Suggestions with API Persistence
     const loadChecklist = async () => {

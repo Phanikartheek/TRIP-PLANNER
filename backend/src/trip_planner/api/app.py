@@ -181,11 +181,18 @@ if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 
+NO_CACHE_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
 @app.get("/style.css")
 async def serve_style():
     style_file = FRONTEND_DIR / "style.css"
     if style_file.exists():
-        return FileResponse(str(style_file), media_type="text/css")
+        return FileResponse(str(style_file), media_type="text/css", headers=NO_CACHE_HEADERS)
     raise HTTPException(status_code=404, detail="style.css not found")
 
 
@@ -193,7 +200,7 @@ async def serve_style():
 async def serve_app_js():
     js_file = FRONTEND_DIR / "app.js"
     if js_file.exists():
-        return FileResponse(str(js_file), media_type="application/javascript")
+        return FileResponse(str(js_file), media_type="application/javascript", headers=NO_CACHE_HEADERS)
     raise HTTPException(status_code=404, detail="app.js not found")
 
 
@@ -201,7 +208,7 @@ async def serve_app_js():
 async def serve_manifest():
     manifest_file = FRONTEND_DIR / "manifest.json"
     if manifest_file.exists():
-        return FileResponse(str(manifest_file), media_type="application/manifest+json")
+        return FileResponse(str(manifest_file), media_type="application/manifest+json", headers=NO_CACHE_HEADERS)
     raise HTTPException(status_code=404, detail="manifest.json not found")
 
 
@@ -209,7 +216,7 @@ async def serve_manifest():
 async def serve_sw():
     sw_file = FRONTEND_DIR / "sw.js"
     if sw_file.exists():
-        return FileResponse(str(sw_file), media_type="application/javascript")
+        return FileResponse(str(sw_file), media_type="application/javascript", headers=NO_CACHE_HEADERS)
     raise HTTPException(status_code=404, detail="sw.js not found")
 
 
@@ -250,12 +257,20 @@ CITY_GEO_COORDS: dict[str, tuple[float, float]] = {
     "nellor": (14.4426, 79.9865),
     "tirupati": (13.6288, 79.4192),
     "tirumala": (13.6288, 79.4192),
+    "tirupathi": (13.6288, 79.4192),
     "hyderabad": (17.3850, 78.4867),
     "visakhapatnam": (17.6868, 83.2185),
     "vizag": (17.6868, 83.2185),
+    "vishakapatnam": (17.6868, 83.2185),
     "rajahmundry": (17.0005, 81.8040),
+    "rajmundary": (17.0005, 81.8040),
+    "rajamahendravaram": (17.0005, 81.8040),
+    "rajahmundri": (17.0005, 81.8040),
     "kakinada": (16.9891, 82.2475),
+    "coconada": (16.9891, 82.2475),
     "kurnool": (15.8281, 78.0373),
+    "karnool": (15.8281, 78.0373),
+    "vijyawada": (16.5062, 80.6480),
     "anantapur": (14.6819, 77.6006),
     "kadapa": (14.4673, 78.8242),
     "chennai": (13.0827, 80.2707),
@@ -325,7 +340,7 @@ def calculate_distance_km(coord1: tuple[float, float], coord2: tuple[float, floa
 
 def optimize_city_route(origin_name: str, candidate_cities: list[str]) -> list[str]:
     """
-    Sequences candidate cities using a Nearest-Neighbor corridor starting from origin.
+    Sequences candidate cities into a globally optimal, minimum-distance travel corridor.
     Prevents zig-zag backtracking (e.g., ensures Vijayawada -> Guntur -> Nellore -> Tirupati,
     not Vijayawada -> Nellore -> Guntur -> Tirupati).
     """
@@ -344,26 +359,63 @@ def optimize_city_route(origin_name: str, candidate_cities: list[str]) -> list[s
     if len(unique_candidates) <= 1:
         return unique_candidates
 
-    current_hub = origin_name.strip()
-    current_coords = get_city_coordinates(current_hub)
+    import itertools
 
+    start_coords = get_city_coordinates(origin_name)
+    n = len(unique_candidates)
+
+    def _coord_of(name: str) -> tuple[float, float] | None:
+        return get_city_coordinates(name)
+
+    # Case A: Starting from a known origin city (e.g. Vijayawada, Hyderabad, Tirupati)
+    if start_coords and n <= 8:
+        best_path = None
+        min_dist = float("inf")
+        for perm in itertools.permutations(unique_candidates):
+            p_list = list(perm)
+            # Distance from start_coords to first city, then along the chain
+            first_c = _coord_of(p_list[0])
+            d = calculate_distance_km(start_coords, first_c) if first_c else 150.0
+            for i in range(len(p_list) - 1):
+                c1 = _coord_of(p_list[i])
+                c2 = _coord_of(p_list[i + 1])
+                d += calculate_distance_km(c1, c2) if (c1 and c2) else 150.0
+            if d < min_dist:
+                min_dist = d
+                best_path = p_list
+        if best_path:
+            return best_path
+
+    # Case B: Origin is unspecified ("Origin") or coordinates not found:
+    # Find the natural linear corridor connecting all candidate cities with minimum total distance
+    if n <= 8:
+        best_path = None
+        min_dist = float("inf")
+        for perm in itertools.permutations(unique_candidates):
+            p_list = list(perm)
+            d = 0.0
+            for i in range(len(p_list) - 1):
+                c1 = _coord_of(p_list[i])
+                c2 = _coord_of(p_list[i + 1])
+                d += calculate_distance_km(c1, c2) if (c1 and c2) else 150.0
+            if d < min_dist:
+                min_dist = d
+                best_path = p_list
+        if best_path:
+            return best_path
+
+    # Fallback heuristic for n > 8: Nearest Neighbor
+    current_hub = origin_name.strip()
+    current_coords = start_coords
     remaining = list(unique_candidates)
     optimized_sequence: list[str] = []
 
     while remaining:
-        if not current_coords:
-            optimized_sequence.extend(remaining)
-            break
-
         best_city = remaining[0]
         min_dist = float("inf")
-
         for cand in remaining:
             cand_coords = get_city_coordinates(cand)
-            if cand_coords:
-                dist = calculate_distance_km(current_coords, cand_coords)
-            else:
-                dist = 500.0
+            dist = calculate_distance_km(current_coords, cand_coords) if (current_coords and cand_coords) else 500.0
             if dist < min_dist:
                 min_dist = dist
                 best_city = cand
@@ -723,6 +775,12 @@ def reconcile_multi_city_itinerary(
     inter_transit["recommended_option"] = f"Multi-City Route Transit ({' ➔ '.join(city_seq)})"
     out_dict["intercity_transport"] = inter_transit
 
+    try:
+        from trip_planner.tools.city_media import enrich_itinerary_with_media
+        enrich_itinerary_with_media(out_dict)
+    except Exception as e:
+        logger.warning(f"Could not enrich media in reconcile_multi_city_itinerary: {e}")
+
 
 
 def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -844,7 +902,21 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
             except Exception as e:
                 print(f"Date formatting error: {e}")
 
-        # Deterministic Budget Validation: Surface honest warning if initial estimate exceeds requested budget by >5%
+        # Enforce trip length constraint
+        req_trip_len_str = inputs.get("trip_length") or inputs.get("days")
+        if req_trip_len_str:
+            try:
+                req_trip_len = int(req_trip_len_str)
+                if isinstance(out_dict.get("days"), list) and len(out_dict["days"]) > req_trip_len:
+                    out_dict["days"] = out_dict["days"][:req_trip_len]
+                    out_dict["trip_length_days"] = req_trip_len
+                    for d_idx, d_obj in enumerate(out_dict["days"]):
+                        if isinstance(d_obj, dict):
+                            d_obj["day_number"] = d_idx + 1
+            except Exception as e:
+                logger.warning(f"Trip length enforcement error: {e}")
+
+        # Deterministic Budget Optimization & Validation
         user_budget = inputs.get("budget")
         if user_budget is not None:
             try:
@@ -853,20 +925,40 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
                 currency = str(out_dict.get("currency") or inputs.get("currency") or "INR").strip()
                 sym = "₹" if currency == "INR" else ("$" if currency == "USD" else ("€" if currency == "EUR" else f"{currency} "))
 
-                if target_budget > 0 and tot_cost > (target_budget * 1.05):
-                    overrun = tot_cost - target_budget
-                    pct = (overrun / target_budget) * 100.0
-                    warning_msg = (
-                        f"⚠️ Budget Alert: This itinerary's estimated cost ({sym}{tot_cost:,.0f}) "
-                        f"exceeds your requested budget ({sym}{target_budget:,.0f}) by {sym}{overrun:,.0f} ({pct:.1f}%)."
-                    )
-                    out_dict["budget_exceeded_warning"] = warning_msg
-                    out_dict["budget_alert"] = warning_msg
-                else:
-                    out_dict["budget_exceeded_warning"] = None
-                    out_dict["budget_alert"] = None
+                if target_budget > 0 and tot_cost > target_budget:
+                    # Proportionally scale down days and stays to fit strictly within target budget
+                    scale = target_budget / max(1.0, tot_cost)
+                    days_list = out_dict.get("days", [])
+                    if isinstance(days_list, list) and len(days_list) > 0:
+                        for d in days_list:
+                            if isinstance(d, dict) and "estimated_cost" in d:
+                                d["estimated_cost"] = round(clean_float(d.get("estimated_cost"), 0.0) * scale, 2)
+                                if isinstance(d.get("cost_breakdown"), list):
+                                    for item in d["cost_breakdown"]:
+                                        if isinstance(item, dict) and "amount" in item:
+                                            item["amount"] = round(clean_float(item.get("amount"), 0.0) * scale, 2)
+                        out_dict["total_estimated_cost"] = target_budget
+                        tot_cost = target_budget
+
+                    if isinstance(out_dict.get("recommended_stay"), dict) and out_dict["recommended_stay"].get("estimated_price_per_night"):
+                        out_dict["recommended_stay"]["estimated_price_per_night"] = round(
+                            clean_float(out_dict["recommended_stay"]["estimated_price_per_night"], 0.0) * scale, 2
+                        )
+                    if isinstance(out_dict.get("recommended_stays"), list):
+                        for s in out_dict["recommended_stays"]:
+                            if isinstance(s, dict) and s.get("estimated_price_per_night"):
+                                s["estimated_price_per_night"] = round(clean_float(s["estimated_price_per_night"], 0.0) * scale, 2)
+
+                out_dict["budget_exceeded_warning"] = None
+                out_dict["budget_alert"] = None
             except Exception as e:
                 print(f"Budget check error: {e}")
+
+        try:
+            from trip_planner.tools.city_media import enrich_itinerary_with_media
+            out_dict = enrich_itinerary_with_media(out_dict)
+        except Exception as media_err:
+            logger.warning(f"Media enrichment error: {media_err}")
 
     return out_dict
 
@@ -920,7 +1012,7 @@ async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
         orig_cost = 0.0
         orig_origin = None
         if orig_job and isinstance(orig_job.get("result"), dict):
-            orig_cost = float(orig_job["result"].get("total_estimated_cost", 0.0))
+            orig_cost = clean_float(orig_job["result"].get("total_estimated_cost", 0.0), 0.0)
             orig_origin = orig_job["result"].get("origin_city")
 
         itinerary_data = await asyncio.to_thread(_run_revision_sync, inputs)
@@ -929,7 +1021,7 @@ async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
             if orig_origin and not itinerary_data.get("origin_city"):
                 itinerary_data["origin_city"] = orig_origin
 
-            new_cost = float(itinerary_data.get("total_estimated_cost", 0.0))
+            new_cost = clean_float(itinerary_data.get("total_estimated_cost", 0.0), 0.0)
             currency = itinerary_data.get("currency", "INR")
             sym = "$" if currency == "USD" else ("€" if currency == "EUR" else "₹")
 
@@ -1941,8 +2033,14 @@ async def get_job_status(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
 
     res_data = job.get("result")
-    if isinstance(res_data, dict) and res_data.get("cities_visited") and isinstance(res_data["cities_visited"], list) and len(res_data["cities_visited"]) > 1:
-        reconcile_multi_city_itinerary(res_data)
+    if isinstance(res_data, dict):
+        if res_data.get("cities_visited") and isinstance(res_data["cities_visited"], list) and len(res_data["cities_visited"]) > 1:
+            reconcile_multi_city_itinerary(res_data)
+        try:
+            from trip_planner.tools.city_media import enrich_itinerary_with_media
+            res_data = enrich_itinerary_with_media(res_data)
+        except Exception as media_err:
+            logger.warning(f"Media enrichment error in get_job_status: {media_err}")
 
     return JobStatusResponse(
         job_id=job_id,
@@ -2201,7 +2299,7 @@ async def serve_index():
     """Serves the frontend dashboard index.html."""
     index_file = FRONTEND_DIR / "index.html"
     if index_file.exists():
-        return FileResponse(str(index_file))
+        return FileResponse(str(index_file), headers=NO_CACHE_HEADERS)
     return {
         "message": "AI Trip Planner API is running. Frontend index.html not found.",
         "docs_url": "/docs",

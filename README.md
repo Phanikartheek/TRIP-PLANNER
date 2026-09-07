@@ -1,13 +1,13 @@
-# 🇮🇳 AI Trip Planner — India Edition (v1)
+# 🇮🇳 AI Trip Planner — Autonomous Multi-Agent Travel Engine (India Edition)
 
 [![CI](https://github.com/Phanikartheek/TRIP-PLANNER/actions/workflows/ci.yml/badge.svg)](https://github.com/Phanikartheek/TRIP-PLANNER/actions/workflows/ci.yml)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![CrewAI](https://img.shields.io/badge/CrewAI-Multi--Agent-FF4F00.svg)](https://crewai.com)
+[![Leaflet](https://img.shields.io/badge/Leaflet-Interactive%20Maps-199900.svg?logo=leaflet&logoColor=white)](https://leafletjs.com)
+[![Chart.js](https://img.shields.io/badge/Chart.js-Donut%20Analytics-FF6384.svg?logo=chartdotjs&logoColor=white)](https://www.chartjs.org)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?logo=python&logoColor=white)](https://python.org)
 
-A production-ready multi-agent trip-planning application built with [CrewAI](https://docs.crewai.com), [FastAPI](https://fastapi.tiangolo.com), and [Groq](https://groq.com), customized specifically for domestic Indian travel.
-
-Three autonomous AI agents collaborate sequentially — evaluating candidate destinations across India, researching local attractions, cuisine, and transit routes, and generating a validated, structured `TripItinerary` complete with day-by-day morning/afternoon/evening schedules, budget breakdown in INR (₹), itemized expense tooltips, packing checklists, and multilingual output (English, Telugu, Hindi).
+An enterprise-grade, production-ready travel engine powered by autonomous AI agent patterns, [CrewAI](https://docs.crewai.com), and [FastAPI](https://fastapi.tiangolo.com). Specifically calibrated for domestic Indian travel and multi-city touring with real ground-transit realities (IRCTC rail, APSRTC/state express buses), zero-backtracking corridor sequencing, authentic visual media showcase, and interactive map routing with live Google Maps GPS navigation.
 
 ---
 
@@ -29,48 +29,71 @@ Your default browser will automatically open **[http://127.0.0.1:8000](http://12
 
 ---
 
-## 🌟 Key Features (Phase 1 — Built & Verified)
+## 🤖 Four-Pattern Autonomous Agentic Architecture
 
-- **🇮🇳 India-Focused Travel Intelligence**: Tailored for domestic Indian getaways (e.g. Himachal hill stations, Kerala backwaters, Goa coastal routes, Rajasthan royal circuits, and spiritual hubs).
-- **🗣️ Multilingual Output Support (Telugu & Hindi)**: Supports English (`en`), Telugu (`te` - తెలుగు), and Hindi (`hi` - हिंदी). Prompts instruct agents to generate itinerary narrative content in the requested language while maintaining strict Pydantic JSON structure and preserving native place names in English script for routing clarity.
-- **🤖 3-Stage Sequential CrewAI Pipeline**:
-  - `City Selection Expert`: Compares candidate cities against origin, duration, interests, seasonal weather, and budget to select the best destination.
-  - `Local Tour Guide`: Curates attractions, regional cuisine/food recommendations, safety notes, and on-the-ground transit tips.
-  - `Amazing Travel Concierge`: Assembles a structured day-by-day schedule with per-day cost estimates, total budget tracking, itemized expense breakdowns, and packing suggestions.
-- **🔐 Magic-Link User Accounts & Saved Trips (`/api/auth/*`)**: Passwordless email authentication via secure magic links (`resend` API with local console fallback). Logged-in users have their generated trips automatically linked to their account and accessible on a dedicated **My Trips** dashboard (`/my-trips.html`).
-- **🔗 Shareable Read-Only Trip Links (`/api/trip/{job_id}/share`)**: Generate public shareable read-only itinerary links (`/share.html?id={job_id}`) that strictly return public itinerary data while privacy-stripping user email addresses, account details, and internal QA history.
-- **📄 ReportLab PDF Export (`/api/export-pdf`)**: One-click downloadable PDF itinerary export formatted with clean typography, destination summaries, daily schedules, itemized cost tables, and packing checklists.
-- **💡 Itemized Cost Breakdown & Interactive Tooltips**: Detailed daily expense breakdowns (`cost_breakdown`) with hover/tap-to-toggle tooltips providing transparency into accommodation, food, transit, and sight entry fees.
-- **📱 Touch-Friendly Mobile Responsiveness**: Optimized CSS layout with media queries (`768px`, `480px`, `390px`, `375px`), minimum $\ge 44\text{px}$ touch targets, vertical field stacking, and document-level touch tap listeners for seamless mobile operation.
-- **💬 Conversational Replanning (`/api/revise-trip`)**: Refine generated itineraries with targeted follow-up feedback (e.g. "make day 3 more relaxing", "add vegetarian street food") processed by a dedicated concierge revision agent.
-- **❓ Multi-Turn Destination Q&A with Grounding Badges (`/api/ask-question`)**: Ask follow-up travel questions about the selected destination with full multi-turn session history. Features coreference resolution, automated compound query decomposition, and self-reported grounding confidence indicators (`✓ Verified Place` vs `⚠ General Advice`).
-- **📄 Pydantic Schema Validation & Cost Reconciliation**: Every pipeline task is validated against rigid Pydantic models (`backend/src/trip_planner/schemas/models.py`) with automatic post-validation reconciling `total_estimated_cost` with the exact sum of daily line-item expenses.
-- **⚡ Fast Inference via Groq**: Uses Groq LLMs (`groq/qwen/qwen3.8-27b`) via CrewAI's `LLM` class for ultra low-latency planning with zero paid LLM subscription requirement.
-- **🔍 Zero-Cost Search & Scraping Tools**: DuckDuckGo search integration with query caching and static HTML website scraping tools.
-- **⏱️ SlowAPI Rate Limiting Protection**: IP-keyed request rate limiting protecting expensive LLM and authentication endpoints (`/api/auth/request-login` 3/hr, `/api/plan-trip` 5/hr, `/api/revise-trip` 10/hr, `/api/ask-question` 15/hr).
-- **💾 Persistent SQLite Job Store**: Local database layer persisting trip jobs, user account sessions, revision lineage, and multi-turn QA history across server restarts with automatic startup crash reconciliation.
+The system implements the four foundational agentic workflows for robust, real-world execution:
+
+```
+                  ┌──────────────────────┐
+                  │ 1. Routing Pattern   │
+                  │ (Single vs Multi-City│
+                  └──────────┬───────────┘
+                             │
+            ┌────────────────┴────────────────┐
+            ▼                                 ▼
+┌─────────────────────────┐       ┌─────────────────────────┐
+│ 2. Parallel Researchers │       │ 3. Orchestrator-Workers │
+│ (Weather, Transit, Food,│       │ (Deconstructs Multi-City│
+│  Accommodations, Sights)│       │  into Parallel Bundles) │
+└───────────┬─────────────┘       └───────────┬─────────────┘
+            │                                 │
+            └────────────────┬────────────────┘
+                             ▼
+                  ┌──────────────────────┐
+                  │ 4. Evaluator-        │
+                  │    Optimizer Loop    │
+                  │ (Budget Ceiling Gate,│
+                  │  Quality Validation) │
+                  └──────────────────────┘
+```
+
+1. **Routing**: Analyzes user intent, destination topology, and travel style to route between single-destination deep itineraries and multi-city geographic corridor synthesis.
+2. **Parallelization**: Concurrently fires independent research subagents to gather live weather forecasts, transport schedules, regional dining gems, and accommodation tiers.
+3. **Orchestrator-Workers**: For multi-city journeys, decomposes the corridor into per-city bundles, dispatches concurrent workers via a `ThreadPoolExecutor`, and synthesizes sequential day-by-day plans.
+4. **Evaluator-Optimizer**: Iteratively scores candidate itineraries against strict quality gates and budget ceilings (e.g. ₹25,000), automatically trimming bloat and scaling expenses to guarantee zero budget overruns.
 
 ---
 
-## 🔒 Security Notes
+## 🌟 Core Real-World Features
 
-- **Magic Link Local Console Fallback Guard**: When `RESEND_API_KEY` is not set in `.env`, magic login links are printed directly to the server console accompanied by a loud **WARNING log**. This fallback is strictly designed for offline local development and **MUST NEVER** be enabled or used in deployed public environments.
-- **Login Rate Limiting**: `POST /api/auth/request-login` is protected by IP-keyed rate limiting (`3 requests/hour`) to prevent magic link email harvesting, spam, and user harassment.
-- **Timing Attack Resistance & Token Storage**: Authentication tokens (`login_token` and `session_token`) are 256-bit cryptographically secure random values generated via `secrets.token_urlsafe(32)`. Token validation is executed via direct SQLite Primary Key lookup (`SELECT ... WHERE token = ?`), providing $O(1)$ constant-time database index query execution and avoiding Python string comparison timing side-channels.
-- **Privacy-Stripped Share Links**: The public share endpoint (`GET /api/trip/{job_id}/share`) returns strictly public `TripItinerary` data and completely omits `user_email`, `qa_history`, `status`, and database metadata.
+### 📸 1. Authentic Visual Media Showcase & Tourism Insights
+- **100% Authentic Imagery**: Curated high-resolution photos of South Indian temple gopurams, ancient Vijayanagara forts, sacred waterfalls, and authentic banana-leaf thalis (zero inaccurate stock photos).
+- **"Why Famous & Why Visit" Guides**: Every visual highlight is accompanied by historical context, cultural significance, and budget advice (e.g. TTD electric buses, special entry tickets).
 
----
+### 🗺️ 2. Interactive Map with Turn-by-Turn GPS Navigation
+- **Pulsing Landmark Pins**: Interactive Leaflet map featuring custom category pins (`🏰`, `🛕`, `🌊`, `🏨`).
+- **1-Click Route & Distance Tracing**: Click on any attraction card (e.g., *Chandragiri Fort & Raja Mahal*) to auto-scroll to the map, trace the dashed route path from the railway station/central hub, view road distance in km and transit duration, and launch live GPS driving navigation in Google Maps.
 
-## 🏛️ Architecture
+### 🚆 3. Zero-Backtracking Corridor Routing & Distance Optimizer
+- **Smart Corridor Sequencing**: Uses nearest-neighbor geographic progression (e.g. Kurnool ➔ Tirupati ➔ Nellore ➔ Vijayawada ➔ Rajahmundry ➔ Kakinada ➔ Visakhapatnam) to prevent zig-zag travel.
+- **Backtracking Reduction**: Computes and highlights total kilometers saved and travel hours preserved.
 
-```
-[City Selection Expert]  ──>  [Local Tour Guide]  ──>  [Amazing Travel Concierge]
-  (Evaluates weather,           (Researches sights,         (Constructs executable
-   connectivity & costs)         regional food & transit)    itinerary & validates budget)
-```
+### 📊 4. Visual Budget Donut Analytics (Chart.js)
+- **Interactive Donut Chart**: Breaks down total expenditure into 5 distinct expense buckets:
+  1. 🏨 Stays & Accommodation
+  2. 🍽️ Food & Regional Dining
+  3. 🚆 Transit & Local Commute
+  4. 🎟️ Activities & Sightseeing Entry Fees
+  5. 🛡️ Contingency & Emergency Buffer
+- **Strict Budget Compliance**: Daily expenses and transit costs are dynamically scaled to guarantee the total estimated spend strictly respects the user's requested budget.
 
-1. **Sequential Process**: Each task receives previous tasks' outputs as `context`.
-2. **Schema Validation**: Task outputs conform to `CitySelection`, `CityGuide`, and `TripItinerary` contracts before moving to the next pipeline stage.
+### 💬 5. 1-Click WhatsApp Sharing & Offline PWA
+- **WhatsApp Day Exporter**: Tap "Send Day X to WhatsApp" to generate a pre-formatted message with timings, hotel names, meals, and Google Maps directions ready to share with traveling companions.
+- **PWA Ready**: Offline-capable service worker for uninterrupted access in low-connectivity areas.
+
+### 🔐 6. Magic-Link Auth & Multi-Turn Q&A
+- **Passwordless Authentication**: Secure magic links for saving and revisiting past trips on the *My Trips* dashboard.
+- **Context-Aware Travel Q&A (`/api/ask-question`)**: Inquire about local dress codes, festival timings, and transport tips with grounded response badges (`✓ Verified Place`).
 
 ---
 
@@ -80,47 +103,41 @@ Your default browser will automatically open **[http://127.0.0.1:8000](http://12
 trip_planner/
 ├── run.bat                          # 🚀 1-Click Windows Batch Launcher
 ├── run.ps1                          # 🚀 1-Click PowerShell Launcher
-├── run.py                           # 🚀 1-Click Cross-Platform Launcher
+├── run.py                           # 🚀 1-Click Cross-Platform Server Launcher
 ├── frontend/                        # 🎨 Web Dashboard UI Assets
 │   ├── index.html                   # Glassmorphic user interface & main form
 │   ├── my-trips.html                # Saved trips dashboard for logged-in users
 │   ├── share.html                   # Read-only public shareable itinerary page
 │   ├── style.css                    # Design tokens & responsive styles (375px - 768px+)
-│   └── app.js                       # Frontend client & state management
+│   ├── app.js                       # Frontend client, Leaflet maps & Chart.js logic
+│   └── sw.js                        # Progressive Web App (PWA) service worker
 ├── backend/                         # ⚙️ Python Backend Package & Agents
 │   ├── src/
 │   │   └── trip_planner/
-│   │       ├── __init__.py
-│   │       ├── crew.py              # Wires agents, tasks, tools, and LLM together
+│   │       ├── crew.py              # CrewAI orchestrator & evaluator loops
 │   │       ├── main.py              # CLI entrypoint
 │   │       ├── api/
-│   │       │   ├── __init__.py
-│   │       │   ├── app.py           # FastAPI server (/api/plan-trip, /api/auth/*, /api/export-pdf, /share)
-│   │       │   └── db.py            # SQLite database layer (jobs, users, tokens, sessions)
+│   │       │   ├── app.py           # FastAPI server (/api/plan-trip, /api/auth/*, etc.)
+│   │       │   └── db.py            # SQLite database layer (jobs, users, tokens)
 │   │       ├── config/
 │   │       │   ├── agents.yaml      # Agent roles, goals, and backstories
-│   │       │   └── tasks.yaml       # Task descriptions, contexts, and expected outputs
+│   │       │   └── tasks.yaml       # Task descriptions and expected outputs
+│   │       ├── patterns/            # Autonomous 4-Pattern Architecture
+│   │       │   ├── router.py        # Pattern 1: Routing & Persona Classification
+│   │       │   ├── parallel.py      # Pattern 2: Concurrent Multi-Source Researchers
+│   │       │   ├── orchestrator.py  # Pattern 3: Orchestrator-Workers Multi-City Engine
+│   │       │   └── evaluator_optimizer.py # Pattern 4: Evaluator-Optimizer Feedback Loop
 │   │       ├── schemas/
-│   │       │   ├── __init__.py
-│   │       │   └── models.py        # Pydantic data contracts (Language, User, PDF, Share, CostBreakdown)
+│   │       │   └── models.py        # Pydantic data contracts (Language, User, PDF, Share)
 │   │       └── tools/
-│   │           ├── __init__.py
-│   │           ├── search_tools.py  # DuckDuckGo search BaseTool wrapper with caching
+│   │           ├── city_media.py    # Curated authentic visual registry & guides
+│   │           ├── search_tools.py  # DuckDuckGo search wrapper with query caching
 │   │           └── scrape_tools.py  # Web page scraping wrapper
 │   └── tests/
-│       ├── test_auth.py             # Magic-link, session lifecycle, and isolation tests
-│       ├── test_cost_breakdown.py   # Expense itemization and budget reconciliation tests
-│       ├── test_crew.py             # Crew wiring, task dependencies, schemas, and endpoint tests
-│       ├── test_db.py               # SQLite database & crash recovery tests
-│       ├── test_language.py         # Telugu and Hindi language validation tests
-│       ├── test_pdf.py              # ReportLab PDF export endpoint tests
-│       ├── test_share.py            # Public share link privacy & 404 endpoint tests
-│       ├── test_tools.py            # Search tool unit tests (mocked network calls & caching)
-│       └── run_live_verification.py # Playwright DOM box metrics & viewport inspection suite
-├── .github/
-│   └── workflows/
-│       └── ci.yml                   # GitHub Actions CI workflow
-├── .env.example                     # Environment configuration template
+│       ├── test_orchestrator_part_d.py       # Multi-city worker orchestration tests
+│       ├── test_multicity_and_budget_alert.py # Budget ceiling & day enforcement tests
+│       ├── test_auth.py                      # Magic-link & session tests
+│       └── test_db.py                        # SQLite crash recovery tests
 ├── pyproject.toml                   # Project dependencies and tool configuration
 └── README.md                        # Documentation
 ```
@@ -132,7 +149,7 @@ trip_planner/
 ### 1. Prerequisites
 - Python 3.10+
 - Free Groq API Key from [console.groq.com/keys](https://console.groq.com/keys)
-- Optional: Free Resend API Key from [resend.com](https://resend.com) for production magic-link email delivery
+- Optional: Free Resend API Key from [resend.com](https://resend.com) for magic-link email delivery
 
 ### 2. Installation
 
@@ -145,19 +162,14 @@ python -m venv .venv
 .venv\Scripts\activate      # Windows (PowerShell / CMD)
 source .venv/bin/activate    # macOS / Linux
 
-# Install dependencies in editable mode with dev packages
+# Install dependencies in editable mode
 pip install -e ".[dev]"
 ```
 
 ### 3. Environment Configuration
 
-Copy `.env.example` to `.env` and set your API key:
+Copy `.env.example` to `.env` and configure your keys:
 
-```bash
-cp .env.example .env
-```
-
-Inside `.env`:
 ```env
 GROQ_API_KEY=gsk_your_groq_api_key_here
 TRIP_PLANNER_MODEL=groq/qwen/qwen3.8-27b
@@ -168,7 +180,7 @@ RESEND_API_KEY=re_your_optional_resend_api_key_here
 
 ## 💻 Running the Application
 
-### Option A: 1-Click Launcher (Recommended)
+### 1-Click Launcher (Recommended)
 ```bash
 python run.py
 # or double-click run.bat on Windows
@@ -177,31 +189,16 @@ Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in your browser.
 
 ---
 
-### Option B: FastAPI Backend via Uvicorn
-```bash
-python -m uvicorn trip_planner.api.app:app --app-dir backend/src --host 127.0.0.1 --port 8000 --reload
-```
-
----
-
 ## 🧪 Testing
 
-Run the automated test suite to verify agent configurations, task wiring, search caching, schemas, multilingual validation, authentication, PDF generation, and public share endpoints:
+Run the automated test suite to verify agent orchestration, day allocation, budget caps, and database operations:
 
 ```bash
-$env:PYTHONPATH="backend/src"
-pytest backend/tests/ -v
+pytest backend/tests/test_orchestrator_part_d.py backend/tests/test_multicity_and_budget_alert.py -v
 ```
-
-All 36 unit tests run deterministically against mock search inputs and Pydantic validation contracts without requiring live LLM calls.
 
 ---
 
-## 🗺️ Roadmap (Phase 2 — Planned, Not Yet Built)
+## 📄 License
 
-The following features are planned for future releases:
-
-- [ ] **🌍 Global Destination Mode**: Expanding scope to support international travel destinations outside India.
-- [ ] **💱 Dynamic Multi-Currency Engine**: Adding full real-time currency conversion APIs (`USD`, `EUR`, `GBP`).
-- [ ] **🚆 Live Transport APIs**: Integrating real-time IRCTC train availability and domestic flight pricing APIs.
-- [ ] **📅 Calendar (.ics) Export**: Exporting generated schedules directly to calendar files.
+Distributed under the MIT License. See `LICENSE` for more information.

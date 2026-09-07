@@ -22,7 +22,9 @@ gather_city_info_task:
 
 plan_itinerary_task:
   description: >-
-    Build a day-by-day itinerary for the {trip_length}-day trip. Each day needs a theme, morning/afternoon/evening plan (<80 words per slot).
+    Build a comprehensive day-by-day itinerary for the {trip_length}-day trip.
+    Each day needs a theme and detailed, practical tourist guidance for morning, afternoon, and evening.
+    DO NOT write brief 1-line generic summaries. For every destination, temple, fort, food spot, or stay, explicitly explain WHY to visit, WHAT makes it famous, historical/cultural significance, budget transit tips (e.g. public buses vs cabs), exact ticket types (special darshan vs free tokens), and specific dishes with prices.
     Specify real iconic spots by name. For EACH day, provide itemized line-item `cost_breakdown` summing to `estimated_cost`. No generic catch-all filler line items.
     CRITICAL DESTINATION SCOPE RULE: If {cities} contains only ONE destination city (e.g. "Vijayawada"), ALL {trip_length} days must be spent entirely in that single city. Set the `city` field on EVERY day object to that single city. Do NOT add, invent, or travel to any other cities. ONLY if multiple cities were explicitly requested in {cities} or `cities_visited`, create a multi-city route visiting the requested cities in geographic proximity order (e.g. starting from Delhi to Jaipur and Udaipur, visit adjacent Jaipur first before proceeding to Udaipur).
     The total_estimated_cost MUST NOT exceed {budget} {currency} for {travelers} traveler(s). This is a hard ceiling constraint, not a suggestion, regardless of how large or small the budget is. Budget allocation guideline: ~40% stay, ~35% activities/food, ~25% transit/contingency. Total estimated cost must equal sum of daily costs.

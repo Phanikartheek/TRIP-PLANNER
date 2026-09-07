@@ -13,6 +13,8 @@ import sys
 import urllib.parse
 from typing import Any
 
+from trip_planner.schemas.models import clean_float
+
 SERVER_INFO = {
     "name": "ai-trip-planner",
     "version": "1.0.0"
@@ -84,7 +86,7 @@ def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         dest = arguments.get("destination", "Goa")
         origin = arguments.get("origin", "Hyderabad")
         days = int(arguments.get("trip_length_days", 3))
-        budget = float(arguments.get("budget", 25000.0))
+        budget = clean_float(arguments.get("budget", 25000.0), 25000.0)
         interests = arguments.get("interests", "sightseeing, food")
 
         # In live MCP tool calls, initiates or returns structured guidance

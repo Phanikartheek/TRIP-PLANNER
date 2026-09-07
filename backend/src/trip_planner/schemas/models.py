@@ -30,12 +30,18 @@ def clean_float(v: object, default: float = 0.0) -> float:
     if v is None:
         return default
     if isinstance(v, (int, float)):
-        return float(v)
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return default
     if isinstance(v, str):
         import re
-        matches = re.findall(r"\d[\d,]*\.?\d*", v)
+        s = v.strip()
+        if not s:
+            return default
+        matches = re.findall(r"\d[\d,]*\.?\d*", s)
         if matches:
-            clean_num = matches[0].replace(",", "")
+            clean_num = matches[0].replace(",", "").rstrip(".")
             try:
                 return float(clean_num)
             except ValueError:
@@ -363,6 +369,13 @@ class CostItem(BaseModel):
         return clean_float(v, 0.0)
 
 
+class DayPhoto(BaseModel):
+    title: str = Field(..., description="Name of the place, hotel, or food dish")
+    category: str = Field(default="Famous Sight", description="Category: 'Famous Sight', 'Budget Stay', or 'Food Gem'")
+    url: str = Field(..., description="Direct image URL")
+    why_famous: str = Field(default="", description="Why this place is famous and why the tourist should visit")
+
+
 class ItineraryDay(BaseModel):
     day_number: int
     date: str | None = Field(default=None, description="Formatted date string for this day (e.g., '12 Sep 2026')")
@@ -389,6 +402,10 @@ class ItineraryDay(BaseModel):
     city: str | None = Field(
         default=None,
         description="City for this specific day in a multi-city trip",
+    )
+    photos: list[DayPhoto] | None = Field(
+        default=None,
+        description="Visual photo showcase of attractions, hotels, and food for this day",
     )
 
     @field_validator("morning", "afternoon", "evening", mode="before")

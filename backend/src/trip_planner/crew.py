@@ -207,6 +207,7 @@ from trip_planner.schemas.models import (  # noqa: E402
     EvaluationResult,
     QAResponse,
     TripItinerary,
+    clean_float,
 )
 from trip_planner.tools import DuckDuckGoSearchTool, build_scrape_tool  # noqa: E402
 
@@ -428,7 +429,7 @@ class TripPlannerCrew:
         import json
 
         data = itinerary.model_dump() if hasattr(itinerary, "model_dump") else dict(itinerary)
-        total_cost = float(data.get("total_estimated_cost", 0.0))
+        total_cost = clean_float(data.get("total_estimated_cost", 0.0), 0.0)
 
         # Criterion 1: Hard budget ceiling
         if target_budget > 0 and total_cost > target_budget:
@@ -446,13 +447,13 @@ class TripPlannerCrew:
             for day in days:
                 if isinstance(day, dict):
                     d_num = day.get("day_number", 1)
-                    d_cost = float(day.get("estimated_cost", 0.0))
+                    d_cost = clean_float(day.get("estimated_cost", 0.0), 0.0)
                     breakdown = day.get("cost_breakdown", [])
                     if isinstance(breakdown, list):
                         for item in breakdown:
                             if isinstance(item, dict):
                                 name = str(item.get("item", "")).strip()
-                                amount = float(item.get("amount", 0.0))
+                                amount = clean_float(item.get("amount", 0.0), 0.0)
                                 lower = name.lower()
                                 if any(kw in lower for kw in ["miscellaneous", "misc", "contingency", "buffer", "unforeseen", "extras", "other expenses"]):
                                     if d_cost > 0 and (amount / d_cost) > 0.25:
@@ -507,7 +508,7 @@ class TripPlannerCrew:
         if "trip_length" not in inputs and "days" in inputs:
             inputs["trip_length"] = inputs["days"]
 
-        target_budget = float(inputs.get("budget", 25000.0))
+        target_budget = clean_float(inputs.get("budget", 25000.0), 25000.0)
         dest_city = str(inputs.get("cities", inputs.get("destination_city", "Destination"))).split(",")[0].strip()
 
         # Initial generation
@@ -565,7 +566,7 @@ class TripPlannerCrew:
             logger.info(f"[EVALUATOR_LOOP] Attempt {attempt} Evaluation: passes={eval_res.passes} | Feedback: {eval_res.feedback}")
 
         if not eval_res.passes:
-            tot_cost = float(out_dict.get("total_estimated_cost", 0.0))
+            tot_cost = clean_float(out_dict.get("total_estimated_cost", 0.0), 0.0)
             overrun = max(0.0, tot_cost - target_budget)
             warn_msg = (
                 f"⚠️ Budget Alert: This itinerary's estimated cost (₹{tot_cost:,.0f}) "
@@ -609,7 +610,7 @@ class TripPlannerCrew:
             origin=origin,
             destination=first_city,
             interests=str(inputs.get("interests", "")),
-            budget=float(inputs.get("budget", 25000.0)),
+            budget=clean_float(inputs.get("budget", 25000.0), 25000.0),
             travel_date=inputs.get("travel_date"),
         )
 
@@ -618,7 +619,7 @@ class TripPlannerCrew:
         candidate_itinerary = orchestrator.orchestrate_itinerary(inputs)
 
         # 4. Evaluator-Optimizer Loop
-        target_budget = float(inputs.get("budget", 25000.0))
+        target_budget = clean_float(inputs.get("budget", 25000.0), 25000.0)
         eval_optimizer = EvaluatorOptimizer(max_passes=2)
         refined_itinerary, eval_report, passes = eval_optimizer.run_optimization_loop(
             candidate=candidate_itinerary,
