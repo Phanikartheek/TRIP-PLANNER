@@ -25,6 +25,7 @@ dev = [
 
 [project.scripts]
 trip-planner = "trip_planner.main:run"
+uvicorn = "trip_planner.uvicorn_wrapper:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]

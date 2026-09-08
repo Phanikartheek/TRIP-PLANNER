@@ -15,7 +15,9 @@ COPY run.py ./
 
 # Now install — backend/src exists so editable install works correctly
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e .
+    pip install --no-cache-dir -e . && \
+    printf '#!/bin/sh\nexec python -m trip_planner.uvicorn_wrapper "$@"\n' > /usr/local/bin/uvicorn && \
+    chmod +x /usr/local/bin/uvicorn
 
 # Expose default port (Railway overrides via $PORT env var)
 EXPOSE 8000
