@@ -68,9 +68,37 @@ document.addEventListener('DOMContentLoaded', () => {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
+  // Helper: WhatsApp Full Trip Summary Share
+  window.shareFullTripWhatsApp = function() {
+    if (!currentItinerary) {
+      showToast('⚠️ No active itinerary loaded to share.');
+      return;
+    }
+    const dest = currentItinerary.destination_city || 'India';
+    const daysCount = (currentItinerary.days && currentItinerary.days.length) || currentItinerary.trip_length_days || 0;
+    const cost = currentItinerary.total_estimated_cost ? `₹${Number(currentItinerary.total_estimated_cost).toLocaleString()}` : 'Budget Matched';
+    
+    let text = `✈️ *AI Travel Itinerary: ${dest} (${daysCount} Days)*\n`;
+    text += `💰 *Est. Total Spend:* ${cost}\n`;
+    text += `👥 *Travelers:* ${currentItinerary.travelers || 1}\n\n`;
+    
+    if (currentItinerary.days && currentItinerary.days.length) {
+      currentItinerary.days.forEach((d, idx) => {
+        const dNum = d.day_number || idx + 1;
+        text += `🌴 *Day ${dNum}: ${d.theme || 'Exploration'}*\n`;
+        if (d.morning) text += `• 🌅 Morning: ${d.morning.slice(0, 110)}...\n`;
+        if (d.afternoon) text += `• ☀️ Afternoon: ${d.afternoon.slice(0, 110)}...\n`;
+        if (d.evening) text += `• 🌆 Evening: ${d.evening.slice(0, 110)}...\n\n`;
+      });
+    }
+    text += `🌐 Crafted with AI Trip Planner: https://web-production-ca841.up.railway.app`;
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
   // DOM Elements
   const form = document.getElementById('trip-form');
   const submitBtn = document.getElementById('submit-btn');
+  const btnShareWhatsApp = document.getElementById('btn-share-whatsapp');
   const originInput = document.getElementById('origin');
   const citiesInput = document.getElementById('cities');
   const interestsInput = document.getElementById('interests');
@@ -1423,11 +1451,18 @@ document.addEventListener('DOMContentLoaded', () => {
         try { localStorage.setItem('trip_planner_last_job_id', resJobId); } catch (e) {}
 
         if (details && details.cities && citiesInput) citiesInput.value = details.cities;
-        if (details && details.trip_length && tripLengthSelect) tripLengthSelect.value = details.trip_length;
+        if (details && details.trip_length && daysSlider) {
+          daysSlider.value = details.trip_length;
+          if (daysBadge) daysBadge.textContent = `${details.trip_length} Days`;
+        }
         if (details && details.budget && budgetInput) {
           budgetInput.value = details.budget;
-          if (budgetValue) budgetValue.textContent = Number(details.budget).toLocaleString();
+          if (budgetBadge) budgetBadge.textContent = `₹${Number(details.budget).toLocaleString()}`;
         }
+        if (details && details.interests && interestsInput) {
+          interestsInput.value = details.interests;
+        }
+        updateBudgetDisplay();
 
         submitBtn.disabled = true;
         submitBtn.innerHTML = `
@@ -3495,10 +3530,20 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!checklistItems || checklistItems.length === 0) {
         checklistItems = (itinerary.packing_suggestions || []).map(item => ({ item, checked: false }));
       }
+      // Retrieve locally saved checklist state for persistent checkboxes
+      const storageKey = `checklist_${currentJobId || 'active'}`;
+      let localChecks = {};
+      try {
+        localChecks = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      } catch (e) {}
+
       packingGrid.innerHTML = '';
       checklistItems.forEach((itemObj, idx) => {
         const itemText = typeof itemObj === 'string' ? itemObj : itemObj.item;
-        const isChecked = typeof itemObj === 'object' && itemObj.checked;
+        const isChecked = (localChecks[itemText] !== undefined)
+          ? localChecks[itemText]
+          : (typeof itemObj === 'object' && Boolean(itemObj.checked));
+
         const itemEl = document.createElement('label');
         itemEl.className = `checklist-item${isChecked ? ' done' : ''}`;
         itemEl.innerHTML = `
@@ -3508,7 +3553,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const checkbox = itemEl.querySelector('input');
         checkbox.addEventListener('change', async () => {
           itemEl.classList.toggle('done', checkbox.checked);
-          if (currentJobId) {
+          try {
+            const currentChecks = JSON.parse(localStorage.getItem(storageKey) || '{}');
+            currentChecks[itemText] = checkbox.checked;
+            localStorage.setItem(storageKey, JSON.stringify(currentChecks));
+          } catch (e) {}
+
+          if (currentJobId && currentJobId !== 'sample-vizag-demo') {
             try {
               await fetch(`${API_BASE}/api/trip/${currentJobId}/checklist`, {
                 method: 'PATCH',
@@ -3516,7 +3567,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ item: itemText, checked: checkbox.checked }),
               });
             } catch (err) {
-              console.error('Failed to update checklist item:', err);
+              console.warn('Backend checklist sync note:', err);
             }
           }
         });
@@ -4421,6 +4472,18 @@ document.addEventListener('DOMContentLoaded', () => {
   if (chipManali) {
     chipManali.addEventListener('click', () => window.loadPresetDestination('Manali, Kasol, Shimla', 6, 32000, 'hiking, nature, photography'));
   }
+
+  // Full Trip WhatsApp Share Button
+  if (btnShareWhatsApp) {
+    btnShareWhatsApp.addEventListener('click', window.shareFullTripWhatsApp);
+  }
+
+  // Map Resize Re-centering
+  window.addEventListener('resize', () => {
+    if (window.activeTripMap) {
+      window.activeTripMap.invalidateSize();
+    }
+  });
 
   // Auto-load trip if job_id passed in URL or recent job stored
   let targetJobId = urlParams.get('job_id') || urlParams.get('id');
