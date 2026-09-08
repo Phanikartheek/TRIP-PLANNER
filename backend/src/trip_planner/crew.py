@@ -4,6 +4,7 @@ objects, attaches tools and the LLM, and assembles the sequential crew.
 """
 
 import os
+import random
 import sys
 import time
 from typing import Any
@@ -123,7 +124,7 @@ def _safe_litellm_completion(*args, **kwargs):
     # Enforce max_tokens = 3500 so LLM structured JSON output is complete while staying within Groq token limits
     kwargs["max_tokens"] = 3500
 
-    max_retries = 8
+    max_retries = 3
     tool_use_fail_count = 0
     for attempt in range(max_retries):
         try:
@@ -144,47 +145,58 @@ def _safe_litellm_completion(*args, **kwargs):
             is_max_tokens = ("output is incomplete" in err_msg.lower() or "finish_reason: length" in err_msg.lower()) and not is_rate_limit
             is_retryable = (is_tool_fail or is_rate_limit or is_parse_fail or is_max_tokens) and attempt < max_retries - 1
 
+            if is_rate_limit:
+                try:
+                    from trip_planner.api.metrics import metrics
+                    metrics.record_provider_429()
+                except Exception:
+                    pass
+
             if is_retryable:
+                try:
+                    from trip_planner.api.metrics import metrics
+                    metrics.record_retry()
+                except Exception:
+                    pass
+
                 if is_tool_fail:
                     tool_use_fail_count += 1
-                    # Remove tool_choice forcing so model can respond naturally
                     if "tool_choice" in kwargs:
                         del kwargs["tool_choice"]
-                    # Inject a nudge message to use the search tool
                     if "messages" in kwargs and isinstance(kwargs["messages"], list):
                         kwargs["messages"].append({
                             "role": "user",
                             "content": "You MUST use the search tool to look up real information. Do NOT answer from your own knowledge. Call the search function now."
                         })
-                    wait_time = 10
-                    print(f"[SAFE_LITELLM] tool_use_failed (attempt {attempt+1}/{max_retries}, fail#{tool_use_fail_count}). Retrying in {wait_time}s with tool_choice removed...", flush=True)
-                    # After 3 consecutive tool_use_failed, drop tools entirely so model can just respond with text
-                    if tool_use_fail_count >= 3:
+                    wait_time = round(3.0 + random.uniform(0.2, 0.8), 2)
+                    print(f"[SAFE_LITELLM] tool_use_failed (attempt {attempt+1}/{max_retries}). Retrying in {wait_time}s...", flush=True)
+                    if tool_use_fail_count >= 2:
                         if "tools" in kwargs:
                             del kwargs["tools"]
                         if "tool_choice" in kwargs:
                             del kwargs["tool_choice"]
-                        # Remove nudge messages we added
                         if "messages" in kwargs and isinstance(kwargs["messages"], list):
                             kwargs["messages"] = [m for m in kwargs["messages"] if not (isinstance(m, dict) and "MUST use the search tool" in str(m.get("content", "")))]
-                        print(f"[SAFE_LITELLM] Dropped tools entirely after {tool_use_fail_count} tool_use_failed errors. Model will respond with text.", flush=True)
+                        print(f"[SAFE_LITELLM] Dropped tools after {tool_use_fail_count} tool_use_failed errors.", flush=True)
                 elif is_max_tokens:
-                    # Output was truncated. Keep max_tokens at 3500 and shrink context
                     kwargs["max_tokens"] = 3500
-                    wait_time = 3
-                    print(f"[SAFE_LITELLM] max_tokens truncation (attempt {attempt+1}/{max_retries}). Shrinking context and retrying in {wait_time}s...", flush=True)
+                    wait_time = round(1.5 + random.uniform(0.1, 0.5), 2)
+                    print(f"[SAFE_LITELLM] max_tokens truncation (attempt {attempt+1}/{max_retries}). Shrinking and retrying in {wait_time}s...", flush=True)
                     if "messages" in kwargs and isinstance(kwargs["messages"], list):
                         kwargs["messages"] = _shrink_messages_further(kwargs["messages"])
                 else:
-                    tool_use_fail_count = 0  # reset on non-tool errors
+                    tool_use_fail_count = 0
                     if is_otpm_limit:
                         kwargs["max_tokens"] = 950
-                    wait_time = 15
-                    print(f"[SAFE_LITELLM] Groq Rate limit or parse failure ({err_msg[:120]}...). Backing off for {wait_time}s (Attempt {attempt+1}/{max_retries})...", flush=True)
+                    # Jittered exponential backoff: base 2.0s * 2^attempt + jitter
+                    base_wait = 2.0 * (2 ** attempt)
+                    wait_time = round(base_wait + random.uniform(0.2, 0.8), 2)
+                    print(f"[SAFE_LITELLM] Rate limit or parse failure ({err_msg[:100]}...). Backing off for {wait_time}s (Attempt {attempt+1}/{max_retries})...", flush=True)
                     if "messages" in kwargs and isinstance(kwargs["messages"], list):
                         kwargs["messages"] = _shrink_messages_further(kwargs["messages"])
                 time.sleep(wait_time)
             else:
+                print(f"[SAFE_LITELLM] Non-retryable or max retries reached ({err_msg[:120]}...). Failing fast.", flush=True)
                 raise e
 
 litellm.completion = _safe_litellm_completion

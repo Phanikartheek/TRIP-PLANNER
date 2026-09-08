@@ -5,11 +5,18 @@ Provides free, no-API-key weather forecasts for destination cities.
 
 import json
 import logging
+import threading
+import time
 import urllib.parse
 import urllib.request
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Bounded in-memory TTL cache for weather forecasts (1 hour freshness window)
+_weather_cache: dict[tuple[str, int], tuple[float, list[dict[str, Any]]]] = {}
+_cache_lock = threading.Lock()
+WEATHER_CACHE_TTL = 3600.0  # 1 hour
 
 # WMO Weather Interpretation Codes (WW)
 WMO_CODE_MAP: dict[int, str] = {
@@ -56,11 +63,20 @@ def get_forecast(city: str, days: int = 5) -> list[dict[str, Any]]:
     Returns a list of daily forecast dictionaries containing date, condition,
     temp_high, temp_low, and rain_probability.
 
+    Caches results in-memory with a 1-hour TTL to prevent redundant upstream API calls.
     Raises Exception on network/API failure so callers can catch and handle fallback.
     """
     clean_city = city.strip()
     if not clean_city:
         raise ValueError("City name cannot be empty")
+
+    cache_key = (clean_city.lower(), days)
+    now = time.time()
+    with _cache_lock:
+        if cache_key in _weather_cache:
+            cached_ts, cached_data = _weather_cache[cache_key]
+            if (now - cached_ts) < WEATHER_CACHE_TTL:
+                return [dict(d) for d in cached_data]
 
     encoded_city = urllib.parse.quote(clean_city)
     geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={encoded_city}&count=1"
@@ -120,6 +136,9 @@ def get_forecast(city: str, days: int = 5) -> list[dict[str, Any]]:
             "temp_low": low,
             "rain_probability": rain_p,
         })
+
+    with _cache_lock:
+        _weather_cache[cache_key] = (time.time(), [dict(d) for d in forecast_list])
 
     return forecast_list
 

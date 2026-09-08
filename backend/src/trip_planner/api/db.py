@@ -16,10 +16,22 @@ _db_path_env = os.environ.get("DB_PATH") or os.environ.get("TRIP_PLANNER_DB_PATH
 DEFAULT_DB_PATH = Path(_db_path_env) if _db_path_env else Path(__file__).resolve().parents[4] / "jobs.db"
 
 
-def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
+class ClosingConnection(sqlite3.Connection):
+    """
+    SQLite connection wrapper that closes the connection and releases OS file locks
+    upon exiting a context manager block, preventing connection leaks.
+    """
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            super().__exit__(exc_type, exc_val, exc_tb)
+        finally:
+            self.close()
+
+
+def get_connection(db_path: Path | str | None = None) -> ClosingConnection:
     target_path = Path(db_path) if db_path else DEFAULT_DB_PATH
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(target_path), timeout=30.0)
+    conn = sqlite3.connect(str(target_path), timeout=30.0, factory=ClosingConnection)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA busy_timeout = 30000;")
@@ -51,6 +63,10 @@ def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
         conn.execute("ALTER TABLE jobs ADD COLUMN travel_date TEXT;")
     if "reminder_sent" not in columns:
         conn.execute("ALTER TABLE jobs ADD COLUMN reminder_sent INTEGER NOT NULL DEFAULT 0;")
+    if "request_hash" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN request_hash TEXT;")
+    if "client_ip" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN client_ip TEXT;")
 
     # Table 2: Users
     conn.execute("""
@@ -212,31 +228,45 @@ def create_job(
     job_id: str,
     job_type: str,
     status: str = "pending",
+    result: dict[str, Any] | None = None,
     parent_job_id: str | None = None,
     user_email: str | None = None,
     travel_date: str | None = None,
+    request_hash: str | None = None,
+    client_ip: str | None = None,
     db_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """
-    Inserts or replaces a job record, optionally associating user_email and travel_date.
+    Inserts or replaces a job record, optionally associating result, user_email, travel_date, request_hash, and client_ip.
     """
     now = time.time()
     clean_email = user_email.strip().lower() if user_email else None
     clean_travel_date = travel_date.strip() if travel_date else None
+    clean_hash = request_hash.strip() if request_hash else None
+    clean_ip = client_ip.strip() if client_ip else None
+    result_json = json.dumps(result) if result else None
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT OR REPLACE INTO jobs (job_id, status, result, error, created_at, job_type, qa_history, parent_job_id, user_email, checklist_state, travel_date, reminder_sent)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            INSERT OR REPLACE INTO jobs (
+                job_id, status, result, error, created_at, job_type,
+                qa_history, parent_job_id, user_email, checklist_state,
+                travel_date, reminder_sent, request_hash, client_ip
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
-            (job_id, status, None, None, now, job_type, json.dumps([]), parent_job_id, clean_email, None, clean_travel_date, 0),
+            (
+                job_id, status, result_json, None, now, job_type,
+                json.dumps([]), parent_job_id, clean_email, None,
+                clean_travel_date, 0, clean_hash, clean_ip,
+            ),
         )
         conn.commit()
     return {
         "job_id": job_id,
         "status": status,
-        "result": None,
+        "result": result,
         "error": None,
         "created_at": now,
         "job_type": job_type,
@@ -246,6 +276,8 @@ def create_job(
         "checklist_state": None,
         "travel_date": clean_travel_date,
         "reminder_sent": False,
+        "request_hash": clean_hash,
+        "client_ip": clean_ip,
     }
 
 
@@ -282,7 +314,106 @@ def get_job(job_id: str, db_path: Path | str | None = None) -> dict[str, Any] | 
             "checklist_state": checklist_data,
             "travel_date": row["travel_date"] if "travel_date" in keys else None,
             "reminder_sent": bool(row["reminder_sent"]) if "reminder_sent" in keys and row["reminder_sent"] is not None else False,
+            "request_hash": row["request_hash"] if "request_hash" in keys else None,
+            "client_ip": row["client_ip"] if "client_ip" in keys else None,
         }
+
+
+def find_active_identical_job(
+    client_key: str, request_hash: str, db_path: Path | str | None = None
+) -> dict[str, Any] | None:
+    """
+    Finds an in-flight (pending or running) job matching the exact request hash for this client/user.
+    Guarantees one user's private job is never returned to another user.
+    """
+    if not request_hash or not client_key:
+        return None
+    clean_key = client_key.strip().lower()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT job_id FROM jobs
+            WHERE request_hash = ? AND status IN ('pending', 'running')
+              AND (LOWER(COALESCE(user_email, '')) = ? OR LOWER(COALESCE(client_ip, '')) = ?)
+            ORDER BY created_at DESC LIMIT 1;
+            """,
+            (request_hash, clean_key, clean_key),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return get_job(row["job_id"], db_path=db_path)
+
+
+def get_active_jobs_for_client(
+    client_key: str, db_path: Path | str | None = None
+) -> list[dict[str, Any]]:
+    """Returns active (pending/running) jobs for a given client (by email or IP)."""
+    if not client_key:
+        return []
+    clean_key = client_key.strip().lower()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT job_id FROM jobs
+            WHERE status IN ('pending', 'running')
+              AND (LOWER(COALESCE(user_email, '')) = ? OR LOWER(COALESCE(client_ip, '')) = ?);
+            """,
+            (clean_key, clean_key),
+        )
+        rows = cursor.fetchall()
+        jobs = []
+        for r in rows:
+            j = get_job(r["job_id"], db_path=db_path)
+            if j:
+                jobs.append(j)
+        return jobs
+
+
+def get_active_jobs_count(db_path: Path | str | None = None) -> int:
+    """Returns the total number of jobs currently pending or running."""
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) as count FROM jobs WHERE status IN ('pending', 'running');"
+        )
+        row = cursor.fetchone()
+        return int(row["count"]) if row else 0
+
+
+def reap_zombie_jobs(
+    max_age_seconds: float = 900.0, db_path: Path | str | None = None
+) -> list[str]:
+    """Reaps jobs stuck in pending/running for longer than max_age_seconds."""
+    now = time.time()
+    cutoff = now - max_age_seconds
+    reaped_ids = []
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT job_id FROM jobs
+            WHERE status IN ('pending', 'running') AND created_at < ?;
+            """,
+            (cutoff,),
+        )
+        rows = cursor.fetchall()
+        for r in rows:
+            jid = r["job_id"]
+            cursor.execute(
+                """
+                UPDATE jobs
+                SET status = 'failed',
+                    error = 'Job timed out and was expired by the runtime zombie reaper.'
+                WHERE job_id = ?;
+                """,
+                (jid,),
+            )
+            reaped_ids.append(jid)
+        conn.commit()
+    return reaped_ids
 
 
 def get_user_jobs(email: str, db_path: Path | str | None = None) -> list[dict[str, Any]]:

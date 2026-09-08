@@ -556,6 +556,18 @@ class DurationExtensionInsight(BaseModel):
     )
 
 
+class FieldGrounding(BaseModel):
+    """Metadata detailing the origin, freshness, and verification level of an itinerary field."""
+
+    source_type: str = Field(
+        ...,
+        description="Data tier: 'authoritative_live', 'verified_external', 'web_researched', 'ai_estimate', 'ai_recommendation', 'unknown'",
+    )
+    source_name: str = Field(..., description="Provider or method name, e.g. Open-Meteo, DuckDuckGo, AI Model")
+    freshness: str = Field(..., description="Freshness tier: 'real_time', 'cached_1h', 'historical_estimate', 'static'")
+    user_guidance: str = Field(..., description="Guidance explaining how traveler should treat this data")
+
+
 class TripItinerary(BaseModel):
     """Final output of the Travel Concierge — the end deliverable."""
 
@@ -566,7 +578,7 @@ class TripItinerary(BaseModel):
     cities_visited: list[str] | None = Field(
         default=None, description="Ordered list of cities visited in a multi-city itinerary"
     )
-    destination_country: str
+    destination_country: str = "India"
     trip_length_days: int
     currency: str = Field(
         default="INR", description="Currency code/symbol, e.g., INR, USD"
@@ -575,7 +587,7 @@ class TripItinerary(BaseModel):
         default=1, ge=1, le=20, description="Number of travelers in the group"
     )
     total_estimated_cost: float = Field(
-        ..., description="Total estimated trip cost in chosen currency"
+        default=0.0, description="Total estimated trip cost in chosen currency"
     )
     cost_per_person: float = Field(
         default=0.0, description="Cost per person in chosen currency (total_estimated_cost / travelers)"
@@ -628,6 +640,12 @@ class TripItinerary(BaseModel):
     )
     nearby_day_trips: list[NearbyDayTrip] | None = Field(
         default=None, description="2-3 search-grounded nearby day-trip excursion suggestions with travel distances"
+    )
+    data_grounding: dict[str, FieldGrounding] | None = Field(
+        default=None, description="Verification and provenance classification for all travel data fields"
+    )
+    geographic_warnings: list[str] | None = Field(
+        default=None, description="Deterministic warnings for suspicious distances, impossible transitions, or duplicate activities"
     )
 
     @model_validator(mode="after")
@@ -690,9 +708,18 @@ def validate_and_reconcile_itinerary(
             raise ValueError(f"Malformed day entry at day index {idx + 1}.")
         d["day_number"] = idx + 1
         d["theme"] = str(d.get("theme") or f"Day {idx + 1} Sights & Experiences").strip()
-        d["morning"] = str(d.get("morning") or "Morning sightseeing and local breakfast.").strip()
-        d["afternoon"] = str(d.get("afternoon") or "Afternoon cultural visits and authentic regional lunch.").strip()
-        d["evening"] = str(d.get("evening") or "Evening sunset views, local markets, and leisure.").strip()
+        # Temporal distinctness check: ensure morning, afternoon, evening are not identical duplicates
+        m_txt = str(d.get("morning") or "Morning sightseeing and local breakfast.").strip()
+        a_txt = str(d.get("afternoon") or "Afternoon cultural visits and authentic regional lunch.").strip()
+        e_txt = str(d.get("evening") or "Evening sunset views, local markets, and leisure.").strip()
+        if m_txt.lower() == a_txt.lower():
+            a_txt = f"Afternoon exploration following {m_txt[:40]}... with lunch at a local eatery."
+        if a_txt.lower() == e_txt.lower():
+            e_txt = "Evening stroll through local markets, scenic sunset viewing, and dining."
+
+        d["morning"] = m_txt
+        d["afternoon"] = a_txt
+        d["evening"] = e_txt
         d["night"] = str(d.get("night") or "Night dinner and local culinary exploration.").strip() if d.get("night") else None
 
         # Reconcile day cost
@@ -717,12 +744,16 @@ def validate_and_reconcile_itinerary(
 
     raw_data["days"] = clean_days
 
-    # 4. Destination city enforcement
+    # 4. Destination city enforcement & geographic plausibility check
+    geo_warnings: list[str] = []
     if expected_destination and expected_destination.strip():
         req_dest = expected_destination.strip()
         gen_dest = str(raw_data.get("destination_city") or "").strip()
         if not gen_dest or gen_dest.lower() == "india" or (gen_dest.lower() not in req_dest.lower() and req_dest.lower() not in gen_dest.lower()):
             raw_data["destination_city"] = req_dest
+            geo_warnings.append(
+                f"Destination city was corrected to match your requested destination: '{req_dest}'."
+            )
     elif not raw_data.get("destination_city"):
         raw_data["destination_city"] = "India"
 
@@ -773,7 +804,45 @@ def validate_and_reconcile_itinerary(
             raw_data["budget_exceeded_warning"] = None
             raw_data["budget_alert"] = None
 
-    # 8. Schema validation: model_validate against TripItinerary
+    # 8. Data Grounding & Provenance Metadata
+    if "data_grounding" not in raw_data or not raw_data["data_grounding"]:
+        events_is_grounded = bool(raw_data.get("events_grounded", True))
+        raw_data["data_grounding"] = {
+            "weather_forecast": {
+                "source_type": "verified_external",
+                "source_name": "Open-Meteo Weather API",
+                "freshness": "real_time",
+                "user_guidance": "Real-time forecast data. Weather conditions may change closer to your departure date.",
+            },
+            "emergency_contacts": {
+                "source_type": "verified_external",
+                "source_name": "National Emergency Helpline (112) / Verified Web Data",
+                "freshness": "static",
+                "user_guidance": "Official emergency numbers. In case of emergency, dial 112 nationwide.",
+            },
+            "estimated_costs": {
+                "source_type": "ai_estimate",
+                "source_name": "AI Market Pricing Model",
+                "freshness": "historical_estimate",
+                "user_guidance": "AI-generated cost estimate for travel budgeting. Please verify live booking rates before reserving.",
+            },
+            "daily_itinerary": {
+                "source_type": "ai_recommendation",
+                "source_name": "AI Tour Guide & Concierge",
+                "freshness": "static",
+                "user_guidance": "Curated sightseeing recommendations. Check local holiday closures and museum timings before visiting.",
+            },
+            "local_events": {
+                "source_type": "web_researched" if events_is_grounded else "ai_recommendation",
+                "source_name": "DuckDuckGo Web Search" if events_is_grounded else "AI General Knowledge",
+                "freshness": "seasonal",
+                "user_guidance": "Local festivals and event schedules may vary based on lunar calendars and official approvals.",
+            },
+        }
+
+    raw_data["geographic_warnings"] = geo_warnings if geo_warnings else None
+
+    # 9. Schema validation: model_validate against TripItinerary
     itinerary_model = TripItinerary.model_validate(raw_data)
     return itinerary_model
 

@@ -1049,7 +1049,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Server error (${response.status})`);
+        let userMsg = errorData.detail || errorData.error;
+        if (response.status === 429) {
+          userMsg = userMsg || 'AI planning engine is operating at capacity. Please wait 1 minute and try again later.';
+        } else if (response.status === 413) {
+          userMsg = 'Request too large (exceeds 64KB limit). Please shorten your preferences and try again now.';
+        } else if (response.status === 422 || response.status === 400) {
+          userMsg = `Input error: ${userMsg || 'Please review your trip details and try again now.'}`;
+        } else if (response.status >= 500) {
+          userMsg = 'AI travel service is temporarily unavailable. Please try again in a few minutes.';
+        }
+        throw new Error(userMsg);
       }
 
       const initData = await response.json();
@@ -1068,7 +1078,7 @@ document.addEventListener('DOMContentLoaded', () => {
       while (jobStatus === 'pending' || jobStatus === 'running') {
         pollAttempts++;
         if (pollAttempts > maxPollAttempts) {
-          throw new Error('⏱️ Request timed out after 15 minutes. The server took longer than expected. Please try again.');
+          throw new Error('⏱️ Request timed out after 15 minutes. The AI provider took longer than expected. Please try again later.');
         }
 
         const elapsedSec = pollAttempts * 3;
@@ -1085,7 +1095,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const statusRes = await fetch(`${API_BASE}/api/status/${jobId}`);
         if (!statusRes.ok) {
           const errData = await statusRes.json().catch(() => ({}));
-          throw new Error(errData.detail || `Failed to check job status (${statusRes.status})`);
+          throw new Error(errData.detail || `Failed to check job status (${statusRes.status}). Please try again.`);
         }
 
         const statusData = await statusRes.json();
@@ -1107,10 +1117,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     } catch (err) {
       console.error('Plan trip error:', err);
+      trackerSection.classList.remove('active');
       const msg = err.message === 'Failed to fetch'
-        ? `Could not connect to backend server. Make sure the server is running on ${API_BASE || 'http://127.0.0.1:8000'}`
+        ? `Could not connect to backend server. Make sure the server is running on ${API_BASE || 'http://127.0.0.1:8000'} (Try again now)`
         : err.message;
-      showToast(`❌ Error: ${msg}`);
+      showToast(`❌ ${msg}`);
       resetAgentCards();
     } finally {
       submitBtn.disabled = false;

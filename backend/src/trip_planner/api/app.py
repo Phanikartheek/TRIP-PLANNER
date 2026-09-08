@@ -4,6 +4,7 @@ and serving the frontend web dashboard.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -30,9 +31,10 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from trip_planner.api import db
+from trip_planner.api.metrics import metrics
+from trip_planner.api.repository import JobRepository, default_job_repository
 from trip_planner.schemas.models import (
     DestinationQuestion,
     QAResponse,
@@ -48,8 +50,34 @@ from trip_planner.tools import format_forecast_summary, get_forecast
 load_dotenv()
 logger = logging.getLogger("trip_planner.api")
 
-# Initialize Rate Limiter keyed by remote IP
-limiter = Limiter(key_func=get_remote_address)
+
+def get_trusted_client_ip(request: Request) -> str:
+    """
+    Extracts the client IP. Inspects X-Forwarded-For only when the app is
+    explicitly behind a trusted reverse proxy (e.g. Railway edge router or TRUST_PROXY=true).
+    Otherwise falls back strictly to the direct connection peer IP (request.client.host).
+    """
+    trust_proxy = os.getenv("TRUST_PROXY", "").lower() in ("true", "1", "yes") or bool(
+        os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PUBLIC_DOMAIN")
+    )
+    if trust_proxy:
+        xff = request.headers.get("X-Forwarded-For")
+        if xff:
+            client_ip = xff.split(",")[0].strip()
+            if client_ip:
+                return client_ip
+    return request.client.host if request.client else "127.0.0.1"
+
+
+# Initialize Rate Limiter keyed by trusted remote IP
+limiter = Limiter(key_func=get_trusted_client_ip)
+
+# Process-local AI concurrency control
+# NOTE: This asyncio.Semaphore is strictly process-local (in-memory within this single Python process).
+# It regulates concurrency within this container instance; it does NOT coordinate across multiple Railway replicas.
+MAX_CONCURRENT_AI_JOBS = int(os.getenv("MAX_CONCURRENT_AI_JOBS", "2"))
+ai_concurrency_semaphore = asyncio.Semaphore(MAX_CONCURRENT_AI_JOBS)
+job_repo: JobRepository = default_job_repository
 
 
 async def _reap_zombie_jobs_worker(db_path: Path | str | None = None) -> None:
@@ -57,29 +85,10 @@ async def _reap_zombie_jobs_worker(db_path: Path | str | None = None) -> None:
     while True:
         try:
             await asyncio.sleep(60)
-            now = time.time()
-            with db.get_connection(db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT job_id, status, created_at
-                    FROM jobs
-                    WHERE status IN ('pending', 'running');
-                    """
-                )
-                active_jobs = cursor.fetchall()
-                for j_row in active_jobs:
-                    j_id = j_row["job_id"]
-                    c_at = j_row["created_at"]
-                    job_ts = c_at if isinstance(c_at, (int, float)) else now
-                    if (now - job_ts) > 900.0:
-                        logger.warning(f"[Req: {j_id}] Reaping zombie job in status '{j_row['status']}' older than 15 minutes.")
-                        db.update_job(
-                            j_id,
-                            status="failed",
-                            error="Job timed out and was expired by the runtime zombie reaper.",
-                            db_path=db_path,
-                        )
+            reaped = job_repo.reap_zombie_jobs(max_age_seconds=900.0)
+            for j_id in reaped:
+                logger.warning(f"[Job: {j_id}] Reaped zombie job older than 15 minutes.")
+                metrics.record_job_expired()
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -1125,47 +1134,63 @@ def _run_revision_sync(inputs: dict[str, Any]) -> dict[str, Any]:
     return {"raw_output": str(result)}
 
 
-async def _execute_trip_job(job_id: str, inputs: dict[str, Any]) -> None:
+async def _execute_trip_job(job_id: str, inputs: dict[str, Any], dedup_key: str | None = None) -> None:
     """
     Background worker task running the CrewAI pipeline and storing results.
     Runs strictly through the real 3-agent AI pipeline without synthetic fallbacks.
+    Regulated by process-local ai_concurrency_semaphore to prevent provider saturation.
     """
-    logger.info(f"[Req: {job_id}] Starting AI trip planning execution for {inputs.get('cities')}")
-    db.update_job(job_id, status="running")
+    logger.info(f"[Job: {job_id}] Starting AI trip planning execution for {inputs.get('cities')}")
+    job_repo.update_job(job_id, status="running")
+    metrics.inc_active_jobs()
+    start_time = time.time()
     try:
-        # Give CrewAI up to 900 seconds (15 minutes) to complete the multi-agent pipeline with live web searches and rate limit backoffs
-        itinerary_data = await asyncio.wait_for(asyncio.to_thread(_run_crew_sync, inputs), timeout=900.0)
+        async with ai_concurrency_semaphore:
+            # Give CrewAI up to 900 seconds (15 minutes) to complete the multi-agent pipeline
+            itinerary_data = await asyncio.wait_for(asyncio.to_thread(_run_crew_sync, inputs), timeout=900.0)
 
-        # Sanity check: Total cost must be > 0 and days list must be non-empty!
-        tot_cost = clean_float(itinerary_data.get("total_estimated_cost", 0.0), 0.0) if isinstance(itinerary_data, dict) else 0.0
-        days_list = itinerary_data.get("days", []) if isinstance(itinerary_data, dict) else []
-        if not isinstance(itinerary_data, dict) or not days_list or len(days_list) == 0 or tot_cost <= 0.0:
-            err_msg = "AI response was malformed after research phase - try a less constrained request"
-            logger.error(f"[Req: {job_id}] Malformed itinerary for job {job_id}: cost={tot_cost}, days={len(days_list) if isinstance(days_list, list) else 0}")
-            db.update_job(job_id, status="failed", error=err_msg)
-            return
+            # Sanity check: Total cost must be > 0 and days list must be non-empty!
+            tot_cost = clean_float(itinerary_data.get("total_estimated_cost", 0.0), 0.0) if isinstance(itinerary_data, dict) else 0.0
+            days_list = itinerary_data.get("days", []) if isinstance(itinerary_data, dict) else []
+            if not isinstance(itinerary_data, dict) or not days_list or len(days_list) == 0 or tot_cost <= 0.0:
+                err_msg = "AI response was malformed after research phase - try a less constrained request"
+                logger.error(f"[Job: {job_id}] Malformed itinerary: cost={tot_cost}, days={len(days_list) if isinstance(days_list, list) else 0}")
+                job_repo.update_job(job_id, status="failed", error=err_msg)
+                metrics.record_generation_failure("validation")
+                return
 
-        db.update_job(job_id, status="complete", result=itinerary_data)
-        logger.info(f"[Req: {job_id}] Itinerary successfully generated and saved to database.")
+            job_repo.update_job(job_id, status="complete", result=itinerary_data)
+            duration = time.time() - start_time
+            metrics.record_generation_success(duration)
+            logger.info(f"[Job: {job_id}] Itinerary successfully generated in {duration:.2f}s and saved to database.")
     except asyncio.TimeoutError:
-        logger.error(f"[Req: {job_id}] CrewAI pipeline execution timed out after 900s for job {job_id}")
-        db.update_job(job_id, status="failed", error="Trip generation timed out. The planning engine took longer than expected. Please try again.")
+        logger.error(f"[Job: {job_id}] CrewAI pipeline execution timed out after 900s")
+        job_repo.update_job(job_id, status="failed", error="Trip generation timed out. The planning engine took longer than expected. Please try again.")
+        metrics.record_generation_failure("timeout")
     except Exception as e:
         err_text = str(e) or repr(e)
-        logger.error(f"[Req: {job_id}] CrewAI pipeline execution failed: {err_text}", exc_info=True)
+        logger.error(f"[Job: {job_id}] CrewAI pipeline execution failed: {err_text}", exc_info=True)
         safe_error = categorize_ai_error(e)
-        db.update_job(job_id, status="failed", error=safe_error)
+        job_repo.update_job(job_id, status="failed", error=safe_error)
+        metrics.record_generation_failure(safe_error)
+    finally:
+        metrics.dec_active_jobs()
+        if dedup_key:
+            _clear_in_flight_request(dedup_key)
 
 
 async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
     """
     Background worker task running the single-agent revision task and storing results.
     Computes deterministic budget-overrun alert when revised cost exceeds original cost.
+    Regulated by process-local ai_concurrency_semaphore.
     """
-    logger.info(f"[Req: {job_id}] Starting itinerary revision execution")
-    db.update_job(job_id, status="running")
+    logger.info(f"[Job: {job_id}] Starting itinerary revision execution")
+    job_repo.update_job(job_id, status="running")
+    metrics.inc_active_jobs()
+    start_time = time.time()
     try:
-        orig_job = db.get_job(job_id)
+        orig_job = job_repo.get_job(job_id)
         orig_cost = 0.0
         orig_origin = None
         orig_dest = None
@@ -1179,7 +1204,8 @@ async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
             orig_days_len = len(orig_res.get("days", []))
             orig_travelers = orig_res.get("travelers", 1)
 
-        itinerary_data = await asyncio.to_thread(_run_revision_sync, inputs)
+        async with ai_concurrency_semaphore:
+            itinerary_data = await asyncio.to_thread(_run_revision_sync, inputs)
 
         if isinstance(itinerary_data, dict):
             if orig_origin and not itinerary_data.get("origin_city"):
@@ -1196,7 +1222,7 @@ async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
                     )
                     itinerary_data = validated.model_dump()
                 except Exception as val_err:
-                    logger.warning(f"[Req: {job_id}] Revision itinerary validation warning: {val_err}")
+                    logger.warning(f"[Job: {job_id}] Revision itinerary validation warning: {val_err}")
 
             new_cost = clean_float(itinerary_data.get("total_estimated_cost", 0.0), 0.0)
             currency = itinerary_data.get("currency", "INR")
@@ -1209,14 +1235,19 @@ async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
                 budget_alert = f"This revision increased your total cost from {sym}{int(orig_cost):,} to {sym}{int(new_cost):,} (+{sym}{int(diff):,}, +{pct:.1f}%)"
 
             itinerary_data["budget_alert"] = budget_alert
-            db.update_job(job_id, status="complete", result=itinerary_data)
-            logger.info(f"[Req: {job_id}] Successfully revised itinerary.")
+            job_repo.update_job(job_id, status="complete", result=itinerary_data)
+            duration = time.time() - start_time
+            metrics.record_generation_success(duration)
+            logger.info(f"[Job: {job_id}] Successfully revised itinerary in {duration:.2f}s.")
         else:
             raise ValueError("AI revision produced malformed output.")
     except Exception as e:
-        logger.error(f"[Req: {job_id}] Revision execution failed: {e}", exc_info=True)
+        logger.error(f"[Job: {job_id}] Revision execution failed: {e}", exc_info=True)
         safe_error = categorize_ai_error(e)
-        db.update_job(job_id, status="failed", error=safe_error)
+        job_repo.update_job(job_id, status="failed", error=safe_error)
+        metrics.record_generation_failure(safe_error)
+    finally:
+        metrics.dec_active_jobs()
 
 
 def _run_qa_sync(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -1289,11 +1320,15 @@ async def _execute_qa_job(
 ) -> None:
     """
     Background worker task running the destination Q&A crew and storing results.
+    Regulated by process-local ai_concurrency_semaphore.
     """
-    logger.info(f"[Req: {job_id}] Starting destination Q&A for root_job={root_job_id}")
-    db.update_job(job_id, status="running")
+    logger.info(f"[Job: {job_id}] Starting destination Q&A for root_job={root_job_id}")
+    job_repo.update_job(job_id, status="running")
+    metrics.inc_active_jobs()
+    start_time = time.time()
     try:
-        qa_data = await asyncio.to_thread(_run_qa_sync, inputs)
+        async with ai_concurrency_semaphore:
+            qa_data = await asyncio.to_thread(_run_qa_sync, inputs)
         qa_exchange = {
             "question": question,
             "answer": qa_data.get("answer", ""),
@@ -1302,18 +1337,23 @@ async def _execute_qa_job(
             "ungrounded_claims": qa_data.get("ungrounded_claims", []),
         }
 
-        root_job = db.get_job(root_job_id)
+        root_job = job_repo.get_job(root_job_id)
         current_history = root_job.get("qa_history", []) if root_job else []
         updated_history = current_history + [qa_exchange]
-        db.update_job(root_job_id, qa_history=updated_history)
+        job_repo.update_job(root_job_id, qa_history=updated_history)
 
         qa_data["qa_history"] = updated_history
-        db.update_job(job_id, status="complete", result=qa_data)
-        logger.info(f"[Req: {job_id}] Destination Q&A completed.")
+        job_repo.update_job(job_id, status="complete", result=qa_data)
+        duration = time.time() - start_time
+        metrics.record_generation_success(duration)
+        logger.info(f"[Job: {job_id}] Destination Q&A completed in {duration:.2f}s.")
     except Exception as e:
-        logger.error(f"[Req: {job_id}] Destination Q&A failed: {e}", exc_info=True)
+        logger.error(f"[Job: {job_id}] Destination Q&A failed: {e}", exc_info=True)
         safe_error = categorize_ai_error(e)
-        db.update_job(job_id, status="failed", error=safe_error)
+        job_repo.update_job(job_id, status="failed", error=safe_error)
+        metrics.record_generation_failure(safe_error)
+    finally:
+        metrics.dec_active_jobs()
 
 
 def _get_current_user_email(request: Request) -> str | None:
@@ -1774,6 +1814,26 @@ async def health_check():
     }
 
 
+@app.get("/api/metrics")
+async def get_system_metrics(request: Request):
+    """
+    Operational observability metrics endpoint.
+    Returns request counts, durations, P50/P95 latencies, failure classifications, and active jobs.
+    Scrubbed of all secrets, credentials, prompts, and personal data.
+    """
+    metrics_token = os.getenv("METRICS_TOKEN")
+    if metrics_token:
+        auth_hdr = request.headers.get("Authorization") or request.headers.get("X-Metrics-Token") or ""
+        if metrics_token not in auth_hdr:
+            raise HTTPException(status_code=401, detail="Unauthorized metrics access.")
+
+    summary = metrics.get_metrics_summary()
+    summary["active_jobs_db"] = job_repo.get_active_jobs_count()
+    summary["max_concurrent_ai_jobs"] = MAX_CONCURRENT_AI_JOBS
+    summary["concurrency_scope"] = "process_local_single_replica"
+    return JSONResponse(summary)
+
+
 class CompareTripsRequest(BaseModel):
     job_ids: list[str] = Field(..., description="List of 2 to 3 completed job IDs to compare")
 
@@ -1785,6 +1845,7 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
     Accepts trip parameters, initializes an async background job,
     and immediately returns a job_id for status polling.
     """
+    metrics.record_request()
     raw_mode = (payload.travel_mode or "").strip().lower()
     mode = raw_mode if raw_mode else "domestic"
 
@@ -1804,25 +1865,54 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
             detail="GROQ_API_KEY is not configured in the environment or .env file.",
         )
 
-    # In-flight duplicate protection against accidental rapid double-clicks
-    client_ip = get_remote_address(request)
-    dedup_key = f"{client_ip}:{payload.origin.lower()}:{payload.cities.lower()}:{payload.trip_length}:{int(payload.budget)}"
-    existing_job_id = _check_in_flight_duplicate(dedup_key)
-    if existing_job_id:
-        existing_job = db.get_job(existing_job_id)
-        if existing_job:
-            logger.info(f"[Req: {existing_job_id}] Duplicate request detected for key '{dedup_key}'. Returning existing active job.")
-            return JobStatusResponse(
-                job_id=existing_job_id,
-                status=existing_job["status"],
-                result=existing_job.get("result"),
-                error=existing_job.get("error"),
-                created_at=existing_job.get("created_at"),
-                travel_date=existing_job.get("travel_date"),
-                reminder_sent=existing_job.get("reminder_sent"),
-            )
+    client_ip = get_trusted_client_ip(request)
+    user_email = _get_current_user_email(request)
+    client_key = user_email or client_ip
 
-    # Fetch weather forecast with explicit error resiliency
+    # Deterministic request deduplication: hash ALL material parameters that affect output
+    material_params = {
+        "origin": payload.origin.strip().lower(),
+        "cities": payload.cities.strip().lower(),
+        "interests": payload.interests.strip().lower(),
+        "trip_length": payload.trip_length,
+        "budget": round(float(payload.budget), 2),
+        "currency": payload.currency.strip().upper(),
+        "travelers": payload.travelers,
+        "language": payload.language.strip().lower(),
+        "travel_date": payload.travel_date.strip() if payload.travel_date else None,
+        "return_date": payload.return_date.strip() if payload.return_date else None,
+        "multi_city": payload.multi_city,
+        "travel_mode": mode,
+    }
+    req_hash = hashlib.sha256(json.dumps(material_params, sort_keys=True).encode()).hexdigest()
+
+    # Check for genuinely identical in-flight job for this specific client (never leak to other users)
+    existing_job = job_repo.find_active_identical_job(client_key, req_hash)
+    if existing_job:
+        logger.info(f"[Job: {existing_job['job_id']}] Identical active request detected for client '{client_key}'. Returning existing active job.")
+        return JobStatusResponse(
+            job_id=existing_job["job_id"],
+            status=existing_job["status"],
+            result=existing_job.get("result"),
+            error=existing_job.get("error"),
+            created_at=existing_job.get("created_at"),
+            travel_date=existing_job.get("travel_date"),
+            reminder_sent=existing_job.get("reminder_sent"),
+        )
+
+    # Rule: Maximum 1 active generation per client/IP to prevent capacity exhaustion
+    active_client_jobs = job_repo.get_active_jobs_for_client(client_key)
+    if active_client_jobs:
+        raise HTTPException(
+            status_code=429,
+            detail="You already have a trip generation in progress. Please wait for it to finish before starting a new one.",
+            headers={"Retry-After": "30"},
+        )
+
+    dedup_key = f"{client_key}:{req_hash}"
+    _register_in_flight_request(dedup_key, "allocating")
+
+    # Fetch weather forecast with in-memory TTL caching (1 hour) & explicit error resiliency
     weather_forecast_str = "Weather data unavailable (seasonal weather guidelines apply)."
     try:
         primary_city = payload.cities.split(",")[0].strip()
@@ -1849,21 +1939,22 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
         "multi_city": payload.multi_city,
     }
 
-    user_email = _get_current_user_email(request)
     job_id = str(uuid.uuid4())
     _register_in_flight_request(dedup_key, job_id)
 
-    job_rec = db.create_job(
+    job_rec = job_repo.create_job(
         job_id=job_id,
         job_type="plan",
         status="pending",
         user_email=user_email,
         travel_date=payload.travel_date,
+        request_hash=req_hash,
+        client_ip=client_ip,
     )
 
-    logger.info(f"[Req: {job_id}] Registered new trip planning job for {payload.cities}")
-    # Kick off asynchronous background execution
-    asyncio.create_task(_execute_trip_job(job_id, crew_inputs))
+    logger.info(f"[Job: {job_id}] Registered new trip planning job for {payload.cities} (hash={req_hash[:12]})")
+    # Kick off asynchronous background execution regulated by concurrency semaphore
+    asyncio.create_task(_execute_trip_job(job_id, crew_inputs, dedup_key=dedup_key))
 
     return JobStatusResponse(
         job_id=job_id,
@@ -1964,7 +2055,20 @@ async def revise_trip_endpoint(request: Request, payload: RevisionRequest):
     Accepts follow-up feedback on an existing completed itinerary,
     spawns a targeted single-agent revision task, and returns a new job_id.
     """
-    orig_job = db.get_job(payload.job_id)
+    metrics.record_request()
+    client_ip = get_trusted_client_ip(request)
+    user_email = _get_current_user_email(request)
+    client_key = user_email or client_ip
+
+    active_client_jobs = job_repo.get_active_jobs_for_client(client_key)
+    if active_client_jobs:
+        raise HTTPException(
+            status_code=429,
+            detail="You already have an active generation or revision in progress. Please wait for it to complete.",
+            headers={"Retry-After": "30"},
+        )
+
+    orig_job = job_repo.get_job(payload.job_id)
     if not orig_job:
         raise HTTPException(status_code=404, detail="Original job not found")
 
@@ -1990,11 +2094,13 @@ async def revise_trip_endpoint(request: Request, payload: RevisionRequest):
     }
 
     new_job_id = str(uuid.uuid4())
-    job_rec = db.create_job(
+    job_rec = job_repo.create_job(
         job_id=new_job_id,
         job_type="revise",
         status="pending",
         parent_job_id=payload.job_id,
+        user_email=user_email,
+        client_ip=client_ip,
     )
 
     asyncio.create_task(_execute_revision_job(new_job_id, revision_inputs))
@@ -2013,7 +2119,11 @@ async def ask_question_endpoint(request: Request, payload: DestinationQuestion):
     Accepts a direct question about a destination from an existing completed job,
     spawns a targeted single-agent Q&A task, and returns a job_id for status polling.
     """
-    orig_job = db.get_job(payload.job_id)
+    metrics.record_request()
+    client_ip = get_trusted_client_ip(request)
+    user_email = _get_current_user_email(request)
+
+    orig_job = job_repo.get_job(payload.job_id)
     if not orig_job:
         raise HTTPException(status_code=404, detail="Original job not found")
 
@@ -2061,11 +2171,13 @@ async def ask_question_endpoint(request: Request, payload: DestinationQuestion):
     }
 
     new_job_id = str(uuid.uuid4())
-    job_rec = db.create_job(
+    job_rec = job_repo.create_job(
         job_id=new_job_id,
         job_type="qa",
         status="pending",
         parent_job_id=payload.job_id,
+        user_email=user_email,
+        client_ip=client_ip,
     )
 
     asyncio.create_task(_execute_qa_job(new_job_id, qa_inputs, root_job_id, payload.question.strip()))
@@ -2129,7 +2241,7 @@ async def smart_request_endpoint(request: Request, payload: SmartRequest):
     elif intent == UserIntent.REVISION:
         target_job_id = payload.job_id
         if not target_job_id:
-            with db.get_connection() as conn:
+            with db.get_connection(job_repo.db_path) as conn:
                 row = conn.cursor().execute(
                     "SELECT job_id FROM jobs WHERE status='complete' AND (job_type='plan' OR job_type='revise') ORDER BY created_at DESC LIMIT 1"
                 ).fetchone()
@@ -2162,7 +2274,7 @@ async def smart_request_endpoint(request: Request, payload: SmartRequest):
     elif intent == UserIntent.QUESTION:
         target_job_id = payload.job_id
         if not target_job_id:
-            with db.get_connection() as conn:
+            with db.get_connection(job_repo.db_path) as conn:
                 row = conn.cursor().execute(
                     "SELECT job_id FROM jobs WHERE status='complete' ORDER BY created_at DESC LIMIT 1"
                 ).fetchone()
@@ -2171,7 +2283,7 @@ async def smart_request_endpoint(request: Request, payload: SmartRequest):
 
         if not target_job_id:
             temp_job_id = str(uuid.uuid4())
-            db.create_job(job_id=temp_job_id, job_type="plan", status="complete", result={"destination_city": "India", "trip_length_days": 1})
+            job_repo.create_job(job_id=temp_job_id, job_type="plan", status="complete", result={"destination_city": "India", "trip_length_days": 1})
             target_job_id = temp_job_id
 
         q_text = extracted.get("question") or payload.text
@@ -2195,7 +2307,7 @@ async def smart_request_endpoint(request: Request, payload: SmartRequest):
         cities = extracted.get("cities") or []
         matching_job_ids = []
         if cities:
-            with db.get_connection() as conn:
+            with db.get_connection(job_repo.db_path) as conn:
                 for c in cities:
                     row = conn.cursor().execute(
                         "SELECT job_id FROM jobs WHERE status='complete' AND result LIKE ? ORDER BY created_at DESC LIMIT 1",
@@ -2234,7 +2346,7 @@ async def get_job_status(job_id: str):
     """
     Returns current status and results of a trip planning job from SQLite.
     """
-    job = db.get_job(job_id)
+    job = job_repo.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -2248,6 +2360,7 @@ async def get_job_status(job_id: str):
         except Exception as media_err:
             logger.warning(f"Media enrichment error in get_job_status: {media_err}")
 
+    db_path = getattr(job_repo, "db_path", None)
     return JobStatusResponse(
         job_id=job_id,
         status=job["status"],
@@ -2256,7 +2369,7 @@ async def get_job_status(job_id: str):
         created_at=job.get("created_at"),
         travel_date=job.get("travel_date"),
         reminder_sent=job.get("reminder_sent"),
-        checklist=db.get_checklist(job_id) if job.get("status") == "complete" else None,
+        checklist=db.get_checklist(job_id, db_path=db_path) if job.get("status") == "complete" else None,
     )
 
 
@@ -2287,7 +2400,7 @@ async def get_trip_recommendations_endpoint(job_id: str):
     with different destination_city, returns up to 3 recommendations with public fields only.
     Excludes user_email, qa_history, and private data.
     """
-    target_job = db.get_job(job_id)
+    target_job = job_repo.get_job(job_id)
     if not target_job:
         raise HTTPException(status_code=404, detail=f"Trip job '{job_id}' not found.")
 
@@ -2298,7 +2411,7 @@ async def get_trip_recommendations_endpoint(job_id: str):
     raw_interests = str(target_res.get("interests") or "").lower()
     interest_words = set(re.findall(r"\w+", raw_interests)) - {"and", "the", "or", "in", "with", "for", "to", "a", "of"}
 
-    with db.get_connection() as conn:
+    with db.get_connection(job_repo.db_path) as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
