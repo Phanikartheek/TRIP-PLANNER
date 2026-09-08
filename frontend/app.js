@@ -94,15 +94,27 @@ document.addEventListener('DOMContentLoaded', () => {
   const foodPills = document.querySelectorAll('.food-pill');
   const quickChips = document.querySelectorAll('.quick-chip');
 
-  // Tracker & Results
+  // Tracker, Results & Empty State Elements
   const trackerSection = document.getElementById('agent-tracker');
   const resultsSection = document.getElementById('results-section');
+  const emptyHeroSection = document.getElementById('empty-state-hero');
+  const btnSampleTrip = document.getElementById('btn-sample-trip');
   const toastContainer = document.getElementById('toast-container');
 
-  // Agent Step Elements
+  // Agent Step & Live Pipeline Elements
   const agent1Card = document.getElementById('agent-1');
   const agent2Card = document.getElementById('agent-2');
   const agent3Card = document.getElementById('agent-3');
+  const agentProgressBarFill = document.getElementById('agent-progress-bar-fill');
+  const agentLiveTickerText = document.getElementById('agent-ticker-text');
+  const agentElapsedBadge = document.getElementById('agent-elapsed-badge');
+  const agent1Log = document.getElementById('agent-1-log');
+  const agent2Log = document.getElementById('agent-2-log');
+  const agent3Log = document.getElementById('agent-3-log');
+
+  // Smart NL Intent Preview Elements
+  const smartParsedPreview = document.getElementById('smart-parsed-preview');
+  const smartParsedChips = document.getElementById('smart-parsed-chips');
 
   // Result Elements
   const destCity = document.getElementById('dest-city');
@@ -160,9 +172,175 @@ document.addEventListener('DOMContentLoaded', () => {
   checkBackendHealth();
   setInterval(checkBackendHealth, 15000);
 
-  // Ensure results and tracker sections are hidden on clean load
+  // Ensure results and tracker sections are hidden on clean load, empty state hero shown
   if (resultsSection) resultsSection.classList.remove('active');
   if (trackerSection) trackerSection.classList.remove('active');
+  if (emptyHeroSection) emptyHeroSection.style.display = 'block';
+
+  // Sample Verified Itinerary for 1-Click Instant Demo
+  const SAMPLE_VIZAG_ITINERARY = {
+    destination_city: "Visakhapatnam",
+    destination_country: "India",
+    trip_length_days: 2,
+    currency: "INR",
+    travelers: 2,
+    total_estimated_cost: 7850.0,
+    cost_per_person: 3925.0,
+    budget_alert: null,
+    budget_exceeded_warning: null,
+    weather_forecast: {
+      temp_range: "26°C - 31°C",
+      rain_chance: "Light Sea Breeze (15%)",
+      uv_humidity: "Moderate UV • 68% Humidity",
+      advice: "Light cottons, sunglasses, and comfortable beach footwear recommended."
+    },
+    emergency_contacts: {
+      national_number: "112",
+      hospital: { name: "King George Hospital (KGH)", area: "Maharanipeta, Visakhapatnam" },
+      police: { name: "Vizag One Town Beach Police Station", area: "Beach Road, Visakhapatnam" }
+    },
+    recommended_stay: {
+      name: "The Park Visakhapatnam / Beachfront Resort",
+      tier: "Beachfront Comfort",
+      price_per_night: "₹2,800 / night",
+      area: "Beach Road, Visakhapatnam",
+      why: "Panoramic Bay of Bengal sea views, walking distance to RK Beach and INS Kursura Submarine."
+    },
+    packing_suggestions: [
+      "Sunscreen SPF 50+ & UV Sunglasses",
+      "Breathable Light Cotton Attire",
+      "Beach Sandals & Walking Shoes",
+      "Power Bank & Camera for Kailasagiri Views",
+      "Valid Government Photo ID (Aadhaar/Passport)"
+    ],
+    local_transport_advice: [
+      "Prepaid auto stands operate 24/7 right outside Visakhapatnam Railway Station (VSKP).",
+      "Ola and Uber cabs are easily available along Beach Road, Rushikonda, and Simhachalam.",
+      "Kailasagiri Ropeway runs from 10:00 AM to 8:00 PM offering panoramic coastline views."
+    ],
+    phrasebook: [
+      { phrase: "Hello / Welcome", local: "నమస్కారం (Namaskaram)", pronunciation: "Nah-mah-skah-ruhm" },
+      { phrase: "How much does this cost?", local: "ఇది ఎంత? (Idhi entha?)", pronunciation: "Ee-dhee en-tha?" },
+      { phrase: "Thank you", local: "ధన్యవాదాలు (Dhanyavadalu)", pronunciation: "Dhun-yuh-vah-dah-loo" },
+      { phrase: "Where is the beach?", local: "సముద్ర తీరం ఎక్కడ? (Samudra theeram ekkada?)", pronunciation: "Suh-moo-druh thee-ruhm ek-kuh-duh?" },
+      { phrase: "Very delicious food!", local: "చాలా బాగుంది! (Chala bavundi!)", pronunciation: "Chah-lah bah-voon-dhee!" }
+    ],
+    days: [
+      {
+        day_number: 1,
+        theme: "Submarine Heritage & RK Beach Coastal Promenade",
+        city: "Visakhapatnam",
+        date: "Day 1",
+        weather_note: "Sunny with pleasant ocean breeze, 29°C",
+        morning: "Savor piping hot Idli, Vada, and Guntur Karam Dosa at Venkatadri Vantillu. Head to the iconic INS Kursura Submarine Museum on RK Beach. Walk through the real Soviet-built submarine, exploring the control deck, torpedo bays, and sailor quarters.",
+        afternoon: "Relish an authentic Andhra Thali and fresh Coastal Chepala Pulusu at Sea Inn (Raju Gari Dhaba). Visit the TU 142 Aircraft Museum directly across the street to marvel at the massive maritime reconnaissance bomber.",
+        evening: "Stroll down the vibrant Ramakrishna (RK) Beach promenade. Enjoy spicy coastal beach corn, muri mixture, and hot filter coffee while watching the Bay of Bengal sunset.",
+        night: "Dine under coastal palms at Sea Pearl Restaurant with Andhra seafood specials, followed by a peaceful moonlit walk along Beach Road.",
+        estimated_cost: 3950.0,
+        cost_breakdown: [
+          { item: "Beachfront Accommodation: 1 Night", amount: 2400.0 },
+          { item: "INS Kursura & Aircraft Museum Entry", amount: 250.0 },
+          { item: "Authentic Coastal Dining & Snacks", amount: 900.0 },
+          { item: "Auto-rickshaw & Cab Transfers", amount: 400.0 }
+        ],
+        photos: [
+          {
+            title: "INS Kursura Submarine Museum",
+            category: "Heritage & Naval Museum",
+            url: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=600&auto=format&fit=crop&q=80",
+            why_famous: "Real decommissioned Russian submarine preserved right on the sandy shores of RK Beach."
+          },
+          {
+            title: "Ramakrishna Beach Promenade",
+            category: "Scenic Coastline",
+            url: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&auto=format&fit=crop&q=80",
+            why_famous: "Vizag's most beloved coastline, lined with museums, street cafes, and sea view spots."
+          }
+        ]
+      },
+      {
+        day_number: 2,
+        theme: "Kailasagiri Hilltop Panoramic Views & Rushikonda Beach",
+        city: "Visakhapatnam",
+        date: "Day 2",
+        weather_note: "Clear blue skies, 28°C with gentle sea winds",
+        morning: "Take the exhilarating scenic Ropeway Cable Car up to Kailasagiri Hill Park. Enjoy breathtaking 360-degree views of the Bay of Bengal meeting the Eastern Ghats, and admire the majestic Shiva-Parvati statue.",
+        afternoon: "Head north along the picturesque Marine Drive to Rushikonda Beach, known for its golden sands and clear waters. Indulge in fresh bamboo chicken and coconut water at beachside shacks.",
+        evening: "Visit the historic Simhachalam Temple nestled in the lush green hills. Marvel at the 11th-century Kalinga architectural stone carvings and serene atmosphere.",
+        night: "Wrap up the trip with famous Andhra Royyala Biryani (Prawn Biryani) at Dakshin Restaurant, picking up famous Madugula Halwa for loved ones before heading to Vizag Railway Station.",
+        estimated_cost: 3900.0,
+        cost_breakdown: [
+          { item: "Kailasagiri Ropeway & Sightseeing", amount: 300.0 },
+          { item: "Rushikonda Water Sports & Beach Snacks", amount: 650.0 },
+          { item: "Simhachalam Temple & Heritage", amount: 200.0 },
+          { item: "Royyala Biryani Dinner & Madugula Halwa", amount: 950.0 },
+          { item: "AC Sedan Cab for full day sightseeing", amount: 1800.0 }
+        ],
+        photos: [
+          {
+            title: "Kailasagiri Hilltop Ropeway",
+            category: "Hilltop Vista & Cable Car",
+            url: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=600&auto=format&fit=crop&q=80",
+            why_famous: "High cliff viewpoint offering panoramic ocean coastline and lush mountain sweeps."
+          },
+          {
+            title: "Rushikonda Beach",
+            category: "Golden Sands & Water Sports",
+            url: "https://images.unsplash.com/photo-1519046904884-53103b34b206?w=600&auto=format&fit=crop&q=80",
+            why_famous: "Cleanest beach in Andhra Pradesh, framed by green hills and gentle surf."
+          }
+        ]
+      }
+    ]
+  };
+
+  // 1-Click Instant Sample Demo Loader
+  window.loadInstantSampleTrip = function() {
+    if (emptyHeroSection) emptyHeroSection.style.display = 'none';
+    if (trackerSection) trackerSection.classList.remove('active');
+    
+    // Pre-populate input fields
+    if (originInput) originInput.value = 'Hyderabad';
+    if (citiesInput) citiesInput.value = 'Visakhapatnam';
+    if (daysSlider) {
+      daysSlider.value = 2;
+      if (daysBadge) daysBadge.textContent = '2 Days';
+    }
+    if (budgetInput) {
+      budgetInput.value = 10000;
+      if (budgetBadge) budgetBadge.textContent = '₹10,000';
+    }
+    
+    currentJobId = 'sample-vizag-demo';
+    currentItinerary = SAMPLE_VIZAG_ITINERARY;
+    
+    renderItinerary(SAMPLE_VIZAG_ITINERARY, 10000, 'INR');
+    
+    if (resultsSection) {
+      resultsSection.classList.add('active');
+      resultsSection.scrollIntoView({ behavior: 'smooth' });
+    }
+    showToast('🎉 Loaded Instant 2-Day Vizag Demo!');
+  };
+
+  // Quick Preset Pre-fill Function
+  window.loadPresetDestination = function(cities, days, budget, interests) {
+    if (citiesInput) citiesInput.value = cities;
+    if (daysSlider) {
+      daysSlider.value = days;
+      if (daysBadge) daysBadge.textContent = `${days} Days`;
+    }
+    if (budgetInput) {
+      budgetInput.value = budget;
+      if (budgetBadge) budgetBadge.textContent = `₹${Number(budget).toLocaleString()}`;
+    }
+    if (interests && interestsInput) interestsInput.value = interests;
+    if (originInput && !originInput.value.trim()) originInput.value = 'Bengaluru';
+    
+    const configCard = document.getElementById('config-card');
+    if (configCard) configCard.scrollIntoView({ behavior: 'smooth' });
+    showToast(`✨ Pre-filled: ${cities}! Click "Plan Trip" to generate.`);
+  };
 
   // State Management
   let currentMode = 'domestic'; // 'domestic' | 'international'
@@ -1136,6 +1314,36 @@ document.addEventListener('DOMContentLoaded', () => {
   const smartBtn = document.getElementById('btn-smart-submit');
   const smartStatus = document.getElementById('smart-request-status');
 
+  function updateSmartPreview(text) {
+    if (!smartParsedPreview || !smartParsedChips) return;
+    if (!text || text.trim().length < 3) {
+      smartParsedPreview.style.display = 'none';
+      return;
+    }
+    const chips = [];
+    const dayMatch = text.match(/(\d+)\s*(?:days?|d\b)/i);
+    if (dayMatch) chips.push(`<div class="smart-tag-chip">📅 <strong>${dayMatch[1]} Days</strong></div>`);
+    const budMatch = text.match(/(?:under|budget|for|₹|inr|rs\.?)\s*([0-9,]+k?)/i);
+    if (budMatch) chips.push(`<div class="smart-tag-chip">💰 <strong>Budget: ${budMatch[1].toUpperCase()}</strong></div>`);
+    const knownCities = ['Varanasi', 'Goa', 'Visakhapatnam', 'Vizag', 'Manali', 'Kerala', 'Munnar', 'Gokarna', 'Jaipur', 'Udaipur', 'Rishikesh', 'Amritsar', 'Hampi', 'Ooty', 'Coorg', 'Shimla', 'Tirupati', 'Vijayawada'];
+    for (const c of knownCities) {
+      if (new RegExp('\\b' + c + '\\b', 'i').test(text)) {
+        chips.push(`<div class="smart-tag-chip">📍 <strong>${c}</strong></div>`);
+        break;
+      }
+    }
+    if (chips.length > 0) {
+      smartParsedChips.innerHTML = chips.join('');
+      smartParsedPreview.style.display = 'block';
+    }
+  }
+
+  if (smartInput) {
+    smartInput.addEventListener('input', (e) => {
+      updateSmartPreview(e.target.value);
+    });
+  }
+
   async function handleSmartRequest() {
     if (!smartInput) return;
     const query = smartInput.value.trim();
@@ -1192,6 +1400,19 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         const badge = intentBadges[intent] || intent;
         smartStatus.innerHTML = `<strong>${badge}</strong>: ${escapeHtml(message)}`;
+      }
+
+      // Render extracted parameters preview tags
+      if (details) {
+        const detailChips = [];
+        if (details.cities) detailChips.push(`<div class="smart-tag-chip">📍 <strong>City:</strong> ${escapeHtml(details.cities)}</div>`);
+        if (details.trip_length) detailChips.push(`<div class="smart-tag-chip">📅 <strong>Duration:</strong> ${details.trip_length} Days</div>`);
+        if (details.budget) detailChips.push(`<div class="smart-tag-chip">💰 <strong>Budget:</strong> ₹${Number(details.budget).toLocaleString()}</div>`);
+        if (details.travel_style) detailChips.push(`<div class="smart-tag-chip">🚶 <strong>Style:</strong> ${escapeHtml(details.travel_style)}</div>`);
+        if (smartParsedPreview && smartParsedChips && detailChips.length > 0) {
+          smartParsedChips.innerHTML = detailChips.join('');
+          smartParsedPreview.style.display = 'block';
+        }
       }
 
       showToast(`🪄 Routed: ${intent.toUpperCase()}`);
@@ -1335,30 +1556,80 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- Agent Progression Animation ---
   function startAgentProgressAnimation() {
     resetAgentCards();
+    if (emptyHeroSection) emptyHeroSection.style.display = 'none';
 
     // Step 1 active immediately
     setAgentState(agent1Card, 'running', 'Searching & Evaluating Options');
+    if (agent1Log) agent1Log.textContent = 'Comparing weather, connectivity & seasonal flight/train fares...';
+    if (agentLiveTickerText) agentLiveTickerText.textContent = 'Agent 1 (City Selection Expert) is analyzing destination feasibility...';
+    if (agentProgressBarFill) agentProgressBarFill.style.width = '15%';
 
-    // Progression simulation while server executes real crew
     let elapsed = 0;
     clearInterval(progressInterval);
     progressInterval = setInterval(() => {
       elapsed += 1;
-      if (elapsed === 3) {
+      if (agentElapsedBadge) {
+        agentElapsedBadge.textContent = `Elapsed: ${elapsed}s • Est: ~40s`;
+      }
+
+      // Stage 1: Agent 1 (0 to 12s)
+      if (elapsed < 12) {
+        if (agentProgressBarFill) agentProgressBarFill.style.width = `${Math.min(35, 12 + elapsed * 2)}%`;
+        if (elapsed === 4 && agent1Log) {
+          agent1Log.textContent = 'Analyzing historical climate, precipitation risks & stay rates...';
+        }
+        if (elapsed === 8 && agent1Log) {
+          agent1Log.textContent = 'Filtering candidate cities against budget constraints...';
+        }
+      }
+      // Stage 2: Agent 2 (12 to 28s)
+      else if (elapsed === 12) {
         setAgentState(agent1Card, 'completed', 'Destination Selected');
+        if (agent1Log) agent1Log.textContent = '✓ Destination selected & verified!';
         setAgentState(agent2Card, 'running', 'Scouting Local Guide & Food');
-      } else if (elapsed === 7) {
+        if (agent2Log) agent2Log.textContent = 'Curating iconic landmarks, regional cuisine & safety contacts...';
+        if (agentLiveTickerText) agentLiveTickerText.textContent = 'Agent 2 (Local Tour Guide) researching attractions & food gems...';
+        if (agentProgressBarFill) agentProgressBarFill.style.width = '45%';
+      } else if (elapsed > 12 && elapsed < 28) {
+        if (agentProgressBarFill) agentProgressBarFill.style.width = `${Math.min(70, 45 + (elapsed - 12) * 1.5)}%`;
+        if (elapsed === 18 && agent2Log) {
+          agent2Log.textContent = 'Mapping local eateries for dietary preferences & street food lanes...';
+        }
+        if (elapsed === 23 && agent2Log) {
+          agent2Log.textContent = 'Verifying transit hubs, metro lines & regional phrasebook...';
+        }
+      }
+      // Stage 3: Agent 3 (28s+)
+      else if (elapsed === 28) {
         setAgentState(agent2Card, 'completed', 'Attractions & Transit Curated');
+        if (agent2Log) agent2Log.textContent = '✓ Local attractions, food & transit verified!';
         setAgentState(agent3Card, 'running', 'Structuring Final Itinerary');
+        if (agent3Log) agent3Log.textContent = 'Synthesizing morning-to-night timeline with strict budget allocations...';
+        if (agentLiveTickerText) agentLiveTickerText.textContent = 'Agent 3 (Travel Concierge) assembling final day-by-day plan...';
+        if (agentProgressBarFill) agentProgressBarFill.style.width = '75%';
+      } else if (elapsed > 28) {
+        if (agentProgressBarFill) agentProgressBarFill.style.width = `${Math.min(94, 75 + (elapsed - 28) * 0.8)}%`;
+        if (elapsed === 34 && agent3Log) {
+          agent3Log.textContent = 'Calculating per-day expense breakdown & accommodation options...';
+        }
+        if (elapsed === 40 && agent3Log) {
+          agent3Log.textContent = 'Finalizing digital travel pass and weather clothing advisor...';
+        }
       }
     }, 1000);
   }
 
   function finishAgentProgressAnimation() {
     clearInterval(progressInterval);
+    if (agentProgressBarFill) agentProgressBarFill.style.width = '100%';
     setAgentState(agent1Card, 'completed', 'Destination Selected');
     setAgentState(agent2Card, 'completed', 'Local Guide Verified');
     setAgentState(agent3Card, 'completed', 'Itinerary Finalized');
+    if (agent1Log) agent1Log.textContent = '✓ Destination selected & validated!';
+    if (agent2Log) agent2Log.textContent = '✓ Attractions & food curated!';
+    if (agent3Log) agent3Log.textContent = '✓ Itinerary finalized & cost verified!';
+    if (agentLiveTickerText) agentLiveTickerText.textContent = '✅ All 3 AI Agents Finished Successfully!';
+    if (emptyHeroSection) emptyHeroSection.style.display = 'none';
   }
 
   function resetAgentCards() {
@@ -1367,6 +1638,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const badge = card.querySelector('.agent-status-badge');
       if (badge) badge.textContent = 'Waiting';
     });
+    if (agent1Log) agent1Log.textContent = 'Waiting in pipeline...';
+    if (agent2Log) agent2Log.textContent = 'Waiting in pipeline...';
+    if (agent3Log) agent3Log.textContent = 'Waiting in pipeline...';
+    if (agentProgressBarFill) agentProgressBarFill.style.width = '0%';
+    if (agentElapsedBadge) agentElapsedBadge.textContent = 'Elapsed: 0s • Est: ~40s';
   }
 
   function setAgentState(card, state, label) {
@@ -3153,38 +3429,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
               </div>` : ''}
             ${day.morning ? `
-              <div class="activity-block">
+              <div class="activity-block slot-morning" onclick="window.focusAttractionOnMap('${escapeHtml(day.morning.slice(0, 45)).replace(/'/g, "\\'")}', '${escapeHtml(displayCity || day.city || city).replace(/'/g, "\\'")}')" style="cursor: pointer;" title="Click to view location on route map">
                 <div class="time-slot-label">🌅 Morning (Breakfast / Fresh Up / Sightseeing)</div>
                 <div class="activity-desc">${escapeHtml(day.morning)}</div>
                 <div style="margin-top: 6px;">
-                  <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.morning.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
+                  <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.morning.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
                     <span>🗺️ Directions in Google Maps ↗</span>
                   </a>
                 </div>
               </div>` : ''}
             ${day.afternoon ? `
-              <div class="activity-block">
+              <div class="activity-block slot-afternoon" onclick="window.focusAttractionOnMap('${escapeHtml(day.afternoon.slice(0, 45)).replace(/'/g, "\\'")}', '${escapeHtml(displayCity || day.city || city).replace(/'/g, "\\'")}')" style="cursor: pointer;" title="Click to view location on route map">
                 <div class="time-slot-label">☀️ Afternoon (Regional Lunch & Sights)</div>
                 <div class="activity-desc">${escapeHtml(day.afternoon)}</div>
                 <div style="margin-top: 6px;">
-                  <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.afternoon.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
+                  <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.afternoon.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
                     <span>🗺️ Directions in Google Maps ↗</span>
                   </a>
                 </div>
               </div>` : ''}
             ${day.evening ? `
-              <div class="activity-block">
+              <div class="activity-block slot-evening" onclick="window.focusAttractionOnMap('${escapeHtml(day.evening.slice(0, 45)).replace(/'/g, "\\'")}', '${escapeHtml(displayCity || day.city || city).replace(/'/g, "\\'")}')" style="cursor: pointer;" title="Click to view location on route map">
                 <div class="time-slot-label">🌆 Evening (Tea / Snacks & Markets)</div>
                 <div class="activity-desc">${escapeHtml(day.evening)}</div>
                 <div style="margin-top: 6px;">
-                  <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.evening.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
+                  <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(day.evening.slice(0, 80) + ' ' + (displayCity || city))}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: #38bdf8; text-decoration: none; background: rgba(56, 189, 248, 0.1); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
                     <span>🗺️ Directions in Google Maps ↗</span>
                   </a>
                 </div>
               </div>` : ''}
             ${day.night ? `
-              <div class="activity-block" style="border-left-color: #a855f7;">
-                <div class="time-slot-label" style="color: #c084fc;">🌙 Night (Famous Dinner & Stroll)</div>
+              <div class="activity-block slot-night">
+                <div class="time-slot-label">🌙 Night (Famous Dinner & Stroll)</div>
                 <div class="activity-desc">${escapeHtml(day.night)}</div>
               </div>` : ''}
           </div>
@@ -4125,6 +4401,27 @@ document.addEventListener('DOMContentLoaded', () => {
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 
+  // Wire instant demo buttons & sample chips
+  if (btnSampleTrip) {
+    btnSampleTrip.addEventListener('click', window.loadInstantSampleTrip);
+  }
+  const chipVizag = document.getElementById('chip-demo-vizag');
+  if (chipVizag) {
+    chipVizag.addEventListener('click', window.loadInstantSampleTrip);
+  }
+  const chipGoa = document.getElementById('chip-demo-goa');
+  if (chipGoa) {
+    chipGoa.addEventListener('click', () => window.loadPresetDestination('Goa, Gokarna, Munnar', 5, 25000, 'nature, beaches, street food'));
+  }
+  const chipVaranasi = document.getElementById('chip-demo-varanasi');
+  if (chipVaranasi) {
+    chipVaranasi.addEventListener('click', () => window.loadPresetDestination('Varanasi, Ayodhya, Prayagraj', 3, 18000, 'temples, heritage, street food'));
+  }
+  const chipManali = document.getElementById('chip-demo-manali');
+  if (chipManali) {
+    chipManali.addEventListener('click', () => window.loadPresetDestination('Manali, Kasol, Shimla', 6, 32000, 'hiking, nature, photography'));
+  }
+
   // Auto-load trip if job_id passed in URL or recent job stored
   let targetJobId = urlParams.get('job_id') || urlParams.get('id');
   if (!targetJobId) {
@@ -4142,6 +4439,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (data.status === 'complete' && data.result) {
             currentJobId = targetJobId;
             currentItinerary = data.result;
+            if (emptyHeroSection) emptyHeroSection.style.display = 'none';
             finishAgentProgressAnimation();
             renderItinerary(data.result, data.result.total_estimated_cost, data.result.currency || 'INR');
             showToast('🎉 Loaded your AI trip itinerary!');
@@ -4153,6 +4451,11 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn('Failed to load initial job:', e);
       }
     })();
+  } else {
+    // Fresh visit: ensure empty state hero is displayed and blank sections are hidden
+    if (emptyHeroSection) emptyHeroSection.style.display = 'block';
+    if (resultsSection) resultsSection.classList.remove('active');
+    if (trackerSection) trackerSection.classList.remove('active');
   }
 
   // Initial Presets & Auth Check Render
