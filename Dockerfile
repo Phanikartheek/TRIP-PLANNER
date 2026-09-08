@@ -28,5 +28,4 @@ ENV PYTHONUNBUFFERED=1 \
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD curl -f http://localhost:${PORT:-8000}/api/health || exit 1
 
-# Shell form so $PORT env var is expanded by Railway at runtime
-CMD uvicorn trip_planner.api.app:app --app-dir backend/src --host 0.0.0.0 --port ${PORT:-8000}
+CMD ["python", "-m", "trip_planner.api.app"]

@@ -2327,7 +2327,7 @@ async def serve_index():
 def start():
     """CLI helper to run the web server."""
     port = int(os.getenv("PORT", "8000"))
-    uvicorn.run("trip_planner.api.app:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("trip_planner.api.app:app", host="0.0.0.0", port=port, reload=False)
 
 
 if __name__ == "__main__":
