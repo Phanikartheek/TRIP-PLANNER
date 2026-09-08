@@ -191,6 +191,7 @@ def test_execute_trip_job_fails_on_malformed_empty_itinerary(monkeypatch):
     when LLM degrades to prose or generates an empty itinerary.
     """
     import asyncio
+
     from trip_planner.api import db
     from trip_planner.api.app import _execute_trip_job
 

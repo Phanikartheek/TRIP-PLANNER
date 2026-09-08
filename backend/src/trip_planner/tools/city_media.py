@@ -5,7 +5,6 @@ for attractions, budget hotels, and iconic food spots across destinations.
 """
 from typing import Any
 
-
 CITY_MEDIA_DATABASE: dict[str, list[dict[str, Any]]] = {
     "tirupati": [
         # Day 1

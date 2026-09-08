@@ -18,6 +18,7 @@ DEFAULT_DB_PATH = Path(_db_path_env) if _db_path_env else Path(__file__).resolve
 
 def get_connection(db_path: Path | str | None = None) -> sqlite3.Connection:
     target_path = Path(db_path) if db_path else DEFAULT_DB_PATH
+    target_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(target_path), timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")

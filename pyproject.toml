@@ -50,3 +50,7 @@ ignore = [
 
 [tool.pyright]
 extraPaths = ["backend/src"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend/src"]

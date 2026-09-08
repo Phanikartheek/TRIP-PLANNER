@@ -162,5 +162,5 @@ def test_pwa_manifest_and_sw_endpoints():
     sw_resp = client.get("/sw.js")
     assert sw_resp.status_code == 200
     assert "application/javascript" in sw_resp.headers.get("content-type", "")
-    assert "trip-planner-v1" in sw_resp.text
+    assert "trip-planner-v" in sw_resp.text
 

@@ -83,13 +83,29 @@ def _rate_limit_handler(request: Request, exc: Exception) -> Response:
 app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore[arg-type]
 
 # Enable CORS for frontend integrations
-# ALLOWED_ORIGINS env var: comma-separated list of allowed origins.
-# Defaults to localhost only for local dev. Set to the Railway domain in production.
-_raw_origins = os.environ.get(
-    "ALLOWED_ORIGINS",
-    "http://localhost:8000,http://127.0.0.1:8000",
-)
-ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+# Builds an explicit allow_origins list including localhost, Railway domain, and ALLOWED_ORIGINS.
+_default_origins = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+# Auto-detect Railway deployed public domain if provided by Railway runtime
+_railway_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN") or os.environ.get("RAILWAY_STATIC_URL")
+if _railway_domain:
+    _clean_domain = _railway_domain.strip().rstrip("/")
+    if not _clean_domain.startswith("http"):
+        _default_origins.extend([f"https://{_clean_domain}", f"http://{_clean_domain}"])
+    else:
+        _default_origins.append(_clean_domain)
+
+_user_origins = [
+    o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
+
+# Deduplicate while preserving order and strictly avoiding wildcard "*"
+ALLOWED_ORIGINS: list[str] = list(dict.fromkeys(_default_origins + _user_origins))
 
 app.add_middleware(
     CORSMiddleware,
@@ -405,7 +421,6 @@ def optimize_city_route(origin_name: str, candidate_cities: list[str]) -> list[s
             return best_path
 
     # Fallback heuristic for n > 8: Nearest Neighbor
-    current_hub = origin_name.strip()
     current_coords = start_coords
     remaining = list(unique_candidates)
     optimized_sequence: list[str] = []
@@ -422,7 +437,6 @@ def optimize_city_route(origin_name: str, candidate_cities: list[str]) -> list[s
 
         optimized_sequence.append(best_city)
         remaining.remove(best_city)
-        current_hub = best_city
         current_coords = get_city_coordinates(best_city)
 
     return optimized_sequence

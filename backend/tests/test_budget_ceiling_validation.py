@@ -127,7 +127,14 @@ def test_budget_warning_with_custom_currency():
         "trip_length_days": 5,
         "currency": "USD",
         "total_estimated_cost": 1400.0,
-        "days": [],
+        "days": [
+            {
+                "day_number": 1,
+                "city": "Bali",
+                "theme": "Arrival & Beach",
+                "estimated_cost": 280.0,
+            }
+        ],
         "packing_suggestions": ["Swimwear"],
     }
 
