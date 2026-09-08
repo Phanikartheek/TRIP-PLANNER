@@ -950,12 +950,13 @@ document.addEventListener('DOMContentLoaded', () => {
     
     people.forEach(p => {
       const diff = paidByMap[p] - perPersonShare;
+      const safeP = escapeHtml(p);
       if (diff > 0) {
-        summaryText += `🟢 <strong>${p}</strong> gets back <span style="color:#4ade80;">₹${diff.toLocaleString('en-IN')}</span><br>`;
+        summaryText += `🟢 <strong>${safeP}</strong> gets back <span style="color:#4ade80;">₹${diff.toLocaleString('en-IN')}</span><br>`;
       } else if (diff < 0) {
-        summaryText += `🔴 <strong>${p}</strong> owes <span style="color:#f87171;">₹${Math.abs(diff).toLocaleString('en-IN')}</span><br>`;
+        summaryText += `🔴 <strong>${safeP}</strong> owes <span style="color:#f87171;">₹${Math.abs(diff).toLocaleString('en-IN')}</span><br>`;
       } else {
-        summaryText += `⚪ <strong>${p}</strong> is fully settled up!<br>`;
+        summaryText += `⚪ <strong>${safeP}</strong> is fully settled up!<br>`;
       }
     });
     summaryText += `</div>`;
@@ -2606,7 +2607,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       if (summaryText) {
-        summaryText.innerHTML = routeAnalysis.corridor_summary || '';
+        summaryText.innerHTML = escapeHtml(routeAnalysis.corridor_summary || '');
       }
     }
 

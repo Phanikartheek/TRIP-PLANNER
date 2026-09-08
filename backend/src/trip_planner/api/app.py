@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -40,6 +41,7 @@ from trip_planner.schemas.models import (
     SmartRequestResponse,
     TripPlanRequest,
     clean_float,
+    validate_and_reconcile_itinerary,
 )
 from trip_planner.tools import format_forecast_summary, get_forecast
 
@@ -50,13 +52,49 @@ logger = logging.getLogger("trip_planner.api")
 limiter = Limiter(key_func=get_remote_address)
 
 
+async def _reap_zombie_jobs_worker(db_path: Path | str | None = None) -> None:
+    """Periodically scans for jobs stuck in 'pending' or 'running' for over 15 minutes and marks them failed."""
+    while True:
+        try:
+            await asyncio.sleep(60)
+            now = time.time()
+            with db.get_connection(db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT job_id, status, created_at
+                    FROM jobs
+                    WHERE status IN ('pending', 'running');
+                    """
+                )
+                active_jobs = cursor.fetchall()
+                for j_row in active_jobs:
+                    j_id = j_row["job_id"]
+                    c_at = j_row["created_at"]
+                    job_ts = c_at if isinstance(c_at, (int, float)) else now
+                    if (now - job_ts) > 900.0:
+                        logger.warning(f"[Req: {j_id}] Reaping zombie job in status '{j_row['status']}' older than 15 minutes.")
+                        db.update_job(
+                            j_id,
+                            status="failed",
+                            error="Job timed out and was expired by the runtime zombie reaper.",
+                            db_path=db_path,
+                        )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning(f"Error in zombie reaper worker: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
-    """Initializes the SQLite job store, reconciles interrupted jobs, and starts reminder task."""
+    """Initializes the SQLite job store, reconciles interrupted jobs, and starts reminder & reaper tasks."""
     db.init_db()
-    task = asyncio.create_task(_reminder_background_worker())
+    remind_task = asyncio.create_task(_reminder_background_worker())
+    reap_task = asyncio.create_task(_reap_zombie_jobs_worker())
     yield
-    task.cancel()
+    remind_task.cancel()
+    reap_task.cancel()
 
 
 app = FastAPI(
@@ -114,6 +152,94 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
 )
+
+
+MAX_REQUEST_BODY_SIZE = 65536  # 64KB production payload limit
+
+
+@app.middleware("http")
+async def enforce_body_size_limit(request: Request, call_next):
+    """
+    Enforces a strict 64KB JSON payload size limit on incoming API mutation requests.
+    Exempts multipart file uploads (/api/transcribe-voice and /api/analyze-travel-photo).
+    """
+    path = request.url.path
+    if request.method in ("POST", "PUT", "PATCH") and not (
+        path.endswith("/transcribe-voice") or path.endswith("/analyze-travel-photo")
+    ):
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > MAX_REQUEST_BODY_SIZE:
+                    return JSONResponse(
+                        {"error": "Payload Too Large: Request body exceeds the 64KB production limit."},
+                        status_code=413,
+                    )
+            except ValueError:
+                pass
+    return await call_next(request)
+
+
+# In-flight duplicate request protection
+_in_flight_lock = threading.Lock()
+_in_flight_requests: dict[str, tuple[str, float]] = {}
+
+
+def _check_in_flight_duplicate(dedup_key: str, window_sec: float = 30.0) -> str | None:
+    """Returns active job_id if an identical request was submitted within the past window_sec seconds."""
+    now = time.time()
+    with _in_flight_lock:
+        if dedup_key in _in_flight_requests:
+            job_id, ts = _in_flight_requests[dedup_key]
+            if (now - ts) < window_sec:
+                return job_id
+            else:
+                del _in_flight_requests[dedup_key]
+    return None
+
+
+def _register_in_flight_request(dedup_key: str, job_id: str) -> None:
+    """Registers an in-flight request dedup key with its job ID and timestamp."""
+    with _in_flight_lock:
+        now = time.time()
+        expired = [k for k, (_, ts) in _in_flight_requests.items() if (now - ts) > 60.0]
+        for k in expired:
+            del _in_flight_requests[k]
+        _in_flight_requests[dedup_key] = (job_id, now)
+
+
+def _clear_in_flight_request(dedup_key: str) -> None:
+    with _in_flight_lock:
+        _in_flight_requests.pop(dedup_key, None)
+
+
+def categorize_ai_error(e: Exception) -> str:
+    """
+    Safely categorizes internal engine and provider exceptions into sanitized user messages.
+    Never exposes internal Python stack traces, API keys, file paths, or raw database messages.
+    """
+    err_str = str(e) or repr(e)
+    err_lower = err_str.lower()
+
+    if "ai response was malformed after research phase" in err_lower:
+        return "AI response was malformed after research phase - try a less constrained request"
+
+    if isinstance(e, asyncio.TimeoutError) or "timeout" in err_lower or "timed out" in err_lower:
+        return "Trip generation timed out. The planning engine took longer than expected. Please try again."
+
+    if "rate limit" in err_lower or "429" in err_lower or "quota" in err_lower or "high demand" in err_lower:
+        return "AI provider is experiencing high demand or rate limits. Please wait a moment and try again."
+
+    if "api_key" in err_lower or "apikey" in err_lower or "unauthorized" in err_lower or "401" in err_lower:
+        return "AI travel service temporarily unavailable. Please try again shortly."
+
+    if "503" in err_lower or "connection" in err_lower or "service unavailable" in err_lower or "bad gateway" in err_lower or "refused" in err_lower:
+        return "External AI provider service is temporarily unavailable. Please try again in a few minutes."
+
+    if "validation" in err_lower or "valueerror" in err_lower or "pydantic" in err_lower:
+        return "The generated itinerary could not be verified for safety and quality. Please try again."
+
+    return "An unexpected error occurred while planning your trip. Please try again."
 
 
 def check_and_send_reminders(db_path: Path | str | None = None) -> list[str]:
@@ -960,12 +1086,22 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
         except Exception as media_err:
             logger.warning(f"Media enrichment error: {media_err}")
 
-        # Sanity check: Ensure generated itinerary has structured days and positive cost
-        tot_cost = clean_float(out_dict.get("total_estimated_cost", 0.0), 0.0) if isinstance(out_dict, dict) else 0.0
-        days_list = out_dict.get("days", []) if isinstance(out_dict, dict) else []
-        if not isinstance(out_dict, dict) or not days_list or len(days_list) == 0 or tot_cost <= 0.0:
-            logger.error(f"[_run_crew_sync] Malformed itinerary generated: cost={tot_cost}, days={len(days_list) if isinstance(days_list, list) else 0}")
-            raise ValueError("AI response was malformed after research phase - try a less constrained request")
+        # Centralized output validation & mathematical reconciliation
+        target_city = str(inputs.get("cities", "")).split(",")[0].strip()
+        req_trip_len = int(inputs.get("trip_length") or inputs.get("days") or len(out_dict.get("days", [])))
+        req_travelers = int(inputs.get("travelers") or 1)
+        target_budget = clean_float(inputs.get("budget"), 25000.0)
+        currency = str(out_dict.get("currency") or inputs.get("currency") or "INR").strip()
+
+        validated_model = validate_and_reconcile_itinerary(
+            out_dict,
+            expected_destination=target_city,
+            expected_trip_length=req_trip_len,
+            expected_travelers=req_travelers,
+            expected_budget=target_budget,
+            currency=currency,
+        )
+        return validated_model.model_dump()
 
     return out_dict
 
@@ -994,6 +1130,7 @@ async def _execute_trip_job(job_id: str, inputs: dict[str, Any]) -> None:
     Background worker task running the CrewAI pipeline and storing results.
     Runs strictly through the real 3-agent AI pipeline without synthetic fallbacks.
     """
+    logger.info(f"[Req: {job_id}] Starting AI trip planning execution for {inputs.get('cities')}")
     db.update_job(job_id, status="running")
     try:
         # Give CrewAI up to 900 seconds (15 minutes) to complete the multi-agent pipeline with live web searches and rate limit backoffs
@@ -1004,19 +1141,20 @@ async def _execute_trip_job(job_id: str, inputs: dict[str, Any]) -> None:
         days_list = itinerary_data.get("days", []) if isinstance(itinerary_data, dict) else []
         if not isinstance(itinerary_data, dict) or not days_list or len(days_list) == 0 or tot_cost <= 0.0:
             err_msg = "AI response was malformed after research phase - try a less constrained request"
-            logger.error(f"[_execute_trip_job] Malformed itinerary for job {job_id}: cost={tot_cost}, days={len(days_list) if isinstance(days_list, list) else 0}")
+            logger.error(f"[Req: {job_id}] Malformed itinerary for job {job_id}: cost={tot_cost}, days={len(days_list) if isinstance(days_list, list) else 0}")
             db.update_job(job_id, status="failed", error=err_msg)
             return
 
         db.update_job(job_id, status="complete", result=itinerary_data)
+        logger.info(f"[Req: {job_id}] Itinerary successfully generated and saved to database.")
     except asyncio.TimeoutError:
-        logger.error(f"[_execute_trip_job] CrewAI pipeline execution timed out after 900s for job {job_id}")
-        db.update_job(job_id, status="failed", error="AI Trip Planning timed out after 900 seconds due to rate limit backoffs. Please try again.")
+        logger.error(f"[Req: {job_id}] CrewAI pipeline execution timed out after 900s for job {job_id}")
+        db.update_job(job_id, status="failed", error="Trip generation timed out. The planning engine took longer than expected. Please try again.")
     except Exception as e:
         err_text = str(e) or repr(e)
-        logger.error(f"[_execute_trip_job] CrewAI pipeline execution failed: {err_text}")
-        clean_error = err_text if "AI response was malformed after research phase" in err_text else f"AI Trip Planning failed: {err_text}"
-        db.update_job(job_id, status="failed", error=clean_error)
+        logger.error(f"[Req: {job_id}] CrewAI pipeline execution failed: {err_text}", exc_info=True)
+        safe_error = categorize_ai_error(e)
+        db.update_job(job_id, status="failed", error=safe_error)
 
 
 async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
@@ -1024,20 +1162,41 @@ async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
     Background worker task running the single-agent revision task and storing results.
     Computes deterministic budget-overrun alert when revised cost exceeds original cost.
     """
+    logger.info(f"[Req: {job_id}] Starting itinerary revision execution")
     db.update_job(job_id, status="running")
     try:
         orig_job = db.get_job(job_id)
         orig_cost = 0.0
         orig_origin = None
+        orig_dest = None
+        orig_days_len = None
+        orig_travelers = 1
         if orig_job and isinstance(orig_job.get("result"), dict):
-            orig_cost = clean_float(orig_job["result"].get("total_estimated_cost", 0.0), 0.0)
-            orig_origin = orig_job["result"].get("origin_city")
+            orig_res = orig_job["result"]
+            orig_cost = clean_float(orig_res.get("total_estimated_cost", 0.0), 0.0)
+            orig_origin = orig_res.get("origin_city")
+            orig_dest = orig_res.get("destination_city")
+            orig_days_len = len(orig_res.get("days", []))
+            orig_travelers = orig_res.get("travelers", 1)
 
         itinerary_data = await asyncio.to_thread(_run_revision_sync, inputs)
 
         if isinstance(itinerary_data, dict):
             if orig_origin and not itinerary_data.get("origin_city"):
                 itinerary_data["origin_city"] = orig_origin
+
+            if "days" in itinerary_data and isinstance(itinerary_data["days"], list) and len(itinerary_data["days"]) > 0:
+                try:
+                    validated = validate_and_reconcile_itinerary(
+                        itinerary_data,
+                        expected_destination=orig_dest,
+                        expected_trip_length=orig_days_len,
+                        expected_travelers=orig_travelers,
+                        currency=itinerary_data.get("currency", "INR"),
+                    )
+                    itinerary_data = validated.model_dump()
+                except Exception as val_err:
+                    logger.warning(f"[Req: {job_id}] Revision itinerary validation warning: {val_err}")
 
             new_cost = clean_float(itinerary_data.get("total_estimated_cost", 0.0), 0.0)
             currency = itinerary_data.get("currency", "INR")
@@ -1050,10 +1209,14 @@ async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
                 budget_alert = f"This revision increased your total cost from {sym}{int(orig_cost):,} to {sym}{int(new_cost):,} (+{sym}{int(diff):,}, +{pct:.1f}%)"
 
             itinerary_data["budget_alert"] = budget_alert
-
-        db.update_job(job_id, status="complete", result=itinerary_data)
+            db.update_job(job_id, status="complete", result=itinerary_data)
+            logger.info(f"[Req: {job_id}] Successfully revised itinerary.")
+        else:
+            raise ValueError("AI revision produced malformed output.")
     except Exception as e:
-        db.update_job(job_id, status="failed", error=str(e))
+        logger.error(f"[Req: {job_id}] Revision execution failed: {e}", exc_info=True)
+        safe_error = categorize_ai_error(e)
+        db.update_job(job_id, status="failed", error=safe_error)
 
 
 def _run_qa_sync(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -1127,6 +1290,7 @@ async def _execute_qa_job(
     """
     Background worker task running the destination Q&A crew and storing results.
     """
+    logger.info(f"[Req: {job_id}] Starting destination Q&A for root_job={root_job_id}")
     db.update_job(job_id, status="running")
     try:
         qa_data = await asyncio.to_thread(_run_qa_sync, inputs)
@@ -1145,8 +1309,11 @@ async def _execute_qa_job(
 
         qa_data["qa_history"] = updated_history
         db.update_job(job_id, status="complete", result=qa_data)
+        logger.info(f"[Req: {job_id}] Destination Q&A completed.")
     except Exception as e:
-        db.update_job(job_id, status="failed", error=str(e))
+        logger.error(f"[Req: {job_id}] Destination Q&A failed: {e}", exc_info=True)
+        safe_error = categorize_ai_error(e)
+        db.update_job(job_id, status="failed", error=safe_error)
 
 
 def _get_current_user_email(request: Request) -> str | None:
@@ -1612,7 +1779,7 @@ class CompareTripsRequest(BaseModel):
 
 
 @app.post("/api/plan-trip", response_model=JobStatusResponse)
-@limiter.limit("30/minute")
+@limiter.limit("10/minute")
 async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
     """
     Accepts trip parameters, initializes an async background job,
@@ -1636,6 +1803,24 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
             status_code=500,
             detail="GROQ_API_KEY is not configured in the environment or .env file.",
         )
+
+    # In-flight duplicate protection against accidental rapid double-clicks
+    client_ip = get_remote_address(request)
+    dedup_key = f"{client_ip}:{payload.origin.lower()}:{payload.cities.lower()}:{payload.trip_length}:{int(payload.budget)}"
+    existing_job_id = _check_in_flight_duplicate(dedup_key)
+    if existing_job_id:
+        existing_job = db.get_job(existing_job_id)
+        if existing_job:
+            logger.info(f"[Req: {existing_job_id}] Duplicate request detected for key '{dedup_key}'. Returning existing active job.")
+            return JobStatusResponse(
+                job_id=existing_job_id,
+                status=existing_job["status"],
+                result=existing_job.get("result"),
+                error=existing_job.get("error"),
+                created_at=existing_job.get("created_at"),
+                travel_date=existing_job.get("travel_date"),
+                reminder_sent=existing_job.get("reminder_sent"),
+            )
 
     # Fetch weather forecast with explicit error resiliency
     weather_forecast_str = "Weather data unavailable (seasonal weather guidelines apply)."
@@ -1666,6 +1851,8 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
 
     user_email = _get_current_user_email(request)
     job_id = str(uuid.uuid4())
+    _register_in_flight_request(dedup_key, job_id)
+
     job_rec = db.create_job(
         job_id=job_id,
         job_type="plan",
@@ -1674,6 +1861,7 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
         travel_date=payload.travel_date,
     )
 
+    logger.info(f"[Req: {job_id}] Registered new trip planning job for {payload.cities}")
     # Kick off asynchronous background execution
     asyncio.create_task(_execute_trip_job(job_id, crew_inputs))
 
@@ -1770,7 +1958,7 @@ async def compare_trips_endpoint(payload: CompareTripsRequest):
 
 
 @app.post("/api/revise-trip", response_model=JobStatusResponse)
-@limiter.limit("10/hour")
+@limiter.limit("15/minute")
 async def revise_trip_endpoint(request: Request, payload: RevisionRequest):
     """
     Accepts follow-up feedback on an existing completed itinerary,
@@ -1819,7 +2007,7 @@ async def revise_trip_endpoint(request: Request, payload: RevisionRequest):
 
 
 @app.post("/api/ask-question", response_model=JobStatusResponse)
-@limiter.limit("15/hour")
+@limiter.limit("20/minute")
 async def ask_question_endpoint(request: Request, payload: DestinationQuestion):
     """
     Accepts a direct question about a destination from an existing completed job,
@@ -1890,7 +2078,7 @@ async def ask_question_endpoint(request: Request, payload: DestinationQuestion):
 
 
 @app.post("/api/smart-request", response_model=SmartRequestResponse)
-@limiter.limit("30/minute")
+@limiter.limit("15/minute")
 async def smart_request_endpoint(request: Request, payload: SmartRequest):
     """
     Intelligent routing endpoint.

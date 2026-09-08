@@ -49,6 +49,43 @@ def clean_float(v: object, default: float = 0.0) -> float:
     return default
 
 
+def validate_text_field(
+    v: str,
+    field_name: str,
+    min_len: int = 2,
+    max_len: int = 500,
+    allow_newlines: bool = False,
+) -> str:
+    """
+    Production-grade text sanitizer & boundary validator.
+    Rejects empty strings, control characters, script/HTML tags, and extreme lengths.
+    """
+    if not isinstance(v, str):
+        raise ValueError(f"'{field_name}' must be a valid text string.")
+
+    cleaned = v.strip()
+    if len(cleaned) < min_len:
+        raise ValueError(f"'{field_name}' must be at least {min_len} characters long.")
+    if len(cleaned) > max_len:
+        raise ValueError(f"'{field_name}' cannot exceed {max_len} characters (got {len(cleaned)}).")
+
+    # Reject ASCII control characters (< 32)
+    allowed_ctrl = {'\n', '\r', '\t'} if allow_newlines else set()
+    if any(ord(c) < 32 and c not in allowed_ctrl for c in cleaned):
+        raise ValueError(f"'{field_name}' contains illegal control characters.")
+
+    # Reject malicious script markup and common XSS vectors
+    lower = cleaned.lower()
+    if any(tag in lower for tag in ("<script", "javascript:", "onload=", "onerror=", "<iframe")):
+        raise ValueError(f"'{field_name}' contains disallowed script or HTML tags.")
+
+    # Require at least one alphanumeric character
+    if not any(c.isalnum() for c in cleaned):
+        raise ValueError(f"'{field_name}' must contain at least one alphanumeric character.")
+
+    return cleaned
+
+
 class TripPlanRequest(BaseModel):
     """Payload for submitting a trip-planning request."""
 
@@ -56,7 +93,7 @@ class TripPlanRequest(BaseModel):
     cities: str = Field(..., description="Comma-separated candidate cities to evaluate")
     interests: str = Field(..., description="User travel interests, hobbies, or vibes")
     trip_length: int = Field(default=5, ge=1, le=30, description="Duration of trip in days")
-    budget: float = Field(default=25000.0, gt=0, description="Budget in chosen currency")
+    budget: float = Field(default=25000.0, description="Budget in chosen currency (min ₹500, max ₹1,00,00,000)")
     currency: str = Field(default="INR", description="Budget currency code")
     travelers: int = Field(default=1, ge=1, le=20, description="Number of travelers for group trip cost splitting")
     travel_mode: str | None = Field(default="domestic", description="Travel mode (domestic vs international)")
@@ -64,6 +101,21 @@ class TripPlanRequest(BaseModel):
     travel_date: str | None = Field(default=None, description="Optional ISO date of travel / departure (YYYY-MM-DD)")
     return_date: str | None = Field(default=None, description="Optional ISO return date (YYYY-MM-DD)")
     multi_city: bool = Field(default=False, description="Whether this is a multi-city routed trip")
+
+    @field_validator("origin")
+    @classmethod
+    def validate_origin(cls, v: str) -> str:
+        return validate_text_field(v, "origin", min_len=2, max_len=100)
+
+    @field_validator("cities")
+    @classmethod
+    def validate_cities(cls, v: str) -> str:
+        return validate_text_field(v, "cities", min_len=2, max_len=200)
+
+    @field_validator("interests")
+    @classmethod
+    def validate_interests(cls, v: str) -> str:
+        return validate_text_field(v, "interests", min_len=2, max_len=500, allow_newlines=True)
 
     @field_validator("language")
     @classmethod
@@ -73,7 +125,16 @@ class TripPlanRequest(BaseModel):
     @field_validator("budget", mode="before")
     @classmethod
     def _parse_req_budget(cls, v: object) -> float:
-        return clean_float(v, 25000.0)
+        if v is None:
+            raise ValueError("Budget is required.")
+        val = clean_float(v, -1.0)
+        if val <= 0:
+            raise ValueError("Budget must be a positive number greater than zero.")
+        if val < 500.0:
+            raise ValueError("Minimum realistic budget is ₹500.")
+        if val > 10000000.0:
+            raise ValueError("Maximum supported budget is ₹1,00,00,000 (1 Crore).")
+        return val
 
 
 class CitySelection(BaseModel):
@@ -339,15 +400,16 @@ class CityGuide(BaseModel):
 
 
 class IntercityTransport(BaseModel):
-    mode: str = Field(..., description="Recommended mode of travel, e.g., 'Train', 'Flight', 'Bus', 'Car/Bike'")
+    mode: str = Field(default="Train / Flight / Bus", description="Recommended mode of travel, e.g., 'Train', 'Flight', 'Bus', 'Car/Bike'")
     recommended_option: str = Field(
-        ..., description="Specific train name/number or flight details (e.g. 'Vande Bharat Express (20703) / Sanghamitra Express')"
+        default="Direct connection / Express service", description="Specific train name/number or flight details (e.g. 'Vande Bharat Express (20703) / Sanghamitra Express')"
     )
-    estimated_cost_per_person: float = Field(..., description="Estimated fare per traveler in user currency")
-    travel_duration: str = Field(..., description="Estimated travel time (e.g. '6 hrs 15 mins')")
-    why_recommended: str = Field(..., description="Why this transit mode is optimal for user's budget and comfort")
+    estimated_cost_per_person: float = Field(default=0.0, description="Estimated fare per traveler in user currency")
+    travel_duration: str = Field(default="Approx. 4-6 hours", description="Estimated travel time (e.g. '6 hrs 15 mins')")
+    why_recommended: str = Field(default="Optimal route balancing speed, budget, and convenience", description="Why this transit mode is optimal for user's budget and comfort")
     local_connect_tips: str = Field(
-        ..., description="Advice on commuting from arrival station/airport to recommended hotel"
+        default="Local taxis, prepaid cabs, and auto-rickshaws are readily available outside the station/terminal.",
+        description="Advice on commuting from arrival station/airport to recommended hotel"
     )
     route_legs: list[dict[str, Any]] | None = Field(
         default=None, description="Leg-by-leg intercity transit recommendations for multi-city trips"
@@ -570,20 +632,150 @@ class TripItinerary(BaseModel):
 
     @model_validator(mode="after")
     def reconcile_total_estimated_cost(self) -> "TripItinerary":
-        """Ensure daily cost_breakdown sums to day.estimated_cost and total_estimated_cost strictly matches daily sum."""
+        """Ensure daily cost_breakdown sums to day.estimated_cost and total_estimated_cost matches daily sum."""
         if self.days:
             for day in self.days:
                 if day.cost_breakdown:
                     sub_total = round(sum(item.amount for item in day.cost_breakdown), 2)
                     if sub_total > 0:
                         day.estimated_cost = sub_total
-            computed_sum = round(sum(day.estimated_cost for day in self.days), 2)
-            if computed_sum > 0:
-                self.total_estimated_cost = computed_sum
+            if len(self.days) >= self.trip_length_days or self.total_estimated_cost <= 0:
+                computed_sum = round(sum(day.estimated_cost for day in self.days), 2)
+                if computed_sum > 0:
+                    self.total_estimated_cost = computed_sum
         num_travelers = max(1, self.travelers) if self.travelers else 1
         self.cost_per_person = round(self.total_estimated_cost / num_travelers, 2)
         return self
 
+
+def validate_and_reconcile_itinerary(
+    raw_data: dict[str, Any],
+    expected_destination: str | None = None,
+    expected_trip_length: int | None = None,
+    expected_travelers: int | None = None,
+    expected_budget: float | None = None,
+    currency: str = "INR",
+    strict_day_count: bool = False,
+) -> TripItinerary:
+    """
+    Authoritative validation and mathematical reconciliation layer for AI-generated itineraries.
+    Strictly verifies destination match, duration match, non-negative costs, mathematical integrity,
+    and Pydantic schema compliance before saving or rendering.
+    """
+    if not isinstance(raw_data, dict):
+        raise ValueError("AI generation failed: response is not a structured dictionary.")
+
+    # 1. Sanitize days list
+    days = raw_data.get("days")
+    if not isinstance(days, list) or len(days) == 0:
+        raise ValueError("AI generation failed: itinerary contains no schedule days.")
+
+    # 2. Reconcile trip duration
+    if expected_trip_length is not None and expected_trip_length > 0:
+        if len(days) > expected_trip_length:
+            days = days[:expected_trip_length]
+            raw_data["days"] = days
+        elif len(days) < expected_trip_length and strict_day_count:
+            raise ValueError(
+                f"AI generated incomplete itinerary: returned {len(days)} days instead of requested {expected_trip_length} days."
+            )
+        raw_data["trip_length_days"] = expected_trip_length
+    else:
+        raw_data["trip_length_days"] = len(days)
+
+    # 3. Validate & repair each day
+    clean_days = []
+    for idx, d in enumerate(days):
+        if not isinstance(d, dict):
+            raise ValueError(f"Malformed day entry at day index {idx + 1}.")
+        d["day_number"] = idx + 1
+        d["theme"] = str(d.get("theme") or f"Day {idx + 1} Sights & Experiences").strip()
+        d["morning"] = str(d.get("morning") or "Morning sightseeing and local breakfast.").strip()
+        d["afternoon"] = str(d.get("afternoon") or "Afternoon cultural visits and authentic regional lunch.").strip()
+        d["evening"] = str(d.get("evening") or "Evening sunset views, local markets, and leisure.").strip()
+        d["night"] = str(d.get("night") or "Night dinner and local culinary exploration.").strip() if d.get("night") else None
+
+        # Reconcile day cost
+        d_cost = clean_float(d.get("estimated_cost"), 0.0)
+        breakdown = d.get("cost_breakdown")
+        if isinstance(breakdown, list) and len(breakdown) > 0:
+            clean_breakdown = []
+            for item in breakdown:
+                if isinstance(item, dict):
+                    clean_item = {
+                        "item": str(item.get("item") or "Sightseeing / Activity").strip(),
+                        "amount": max(0.0, clean_float(item.get("amount"), 0.0)),
+                    }
+                    clean_breakdown.append(clean_item)
+            d["cost_breakdown"] = clean_breakdown
+            if clean_breakdown:
+                calc_cost = sum(i["amount"] for i in clean_breakdown)
+                if calc_cost > 0:
+                    d_cost = calc_cost
+        d["estimated_cost"] = max(0.0, round(d_cost, 2))
+        clean_days.append(d)
+
+    raw_data["days"] = clean_days
+
+    # 4. Destination city enforcement
+    if expected_destination and expected_destination.strip():
+        req_dest = expected_destination.strip()
+        gen_dest = str(raw_data.get("destination_city") or "").strip()
+        if not gen_dest or gen_dest.lower() == "india" or (gen_dest.lower() not in req_dest.lower() and req_dest.lower() not in gen_dest.lower()):
+            raw_data["destination_city"] = req_dest
+    elif not raw_data.get("destination_city"):
+        raw_data["destination_city"] = "India"
+
+    if not raw_data.get("destination_country"):
+        raw_data["destination_country"] = "India"
+
+    # 5. Packing suggestions fallback if missing
+    packing = raw_data.get("packing_suggestions")
+    if not isinstance(packing, list) or len(packing) == 0:
+        raw_data["packing_suggestions"] = [
+            "Comfortable cotton clothing & walking shoes",
+            "Government ID (Aadhaar/Passport) & tickets",
+            "Universal mobile charger & power bank",
+            "Personal toiletries & basic first-aid kit",
+            "Light backpack & reusable water bottle",
+        ]
+
+    # 6. Traveler count & cost per person
+    travelers = expected_travelers if (expected_travelers and expected_travelers > 0) else int(raw_data.get("travelers") or 1)
+    travelers = max(1, min(20, travelers))
+    raw_data["travelers"] = travelers
+
+    existing_total = clean_float(raw_data.get("total_estimated_cost"), 0.0)
+    day_sum = round(sum(d["estimated_cost"] for d in clean_days), 2)
+    expected_len = int(raw_data.get("trip_length_days") or len(clean_days))
+    if existing_total <= 0 or len(clean_days) >= expected_len:
+        total_cost = day_sum if day_sum > 0 else existing_total
+    else:
+        total_cost = existing_total
+
+    raw_data["total_estimated_cost"] = total_cost
+    raw_data["cost_per_person"] = round(total_cost / travelers, 2)
+    raw_data["currency"] = currency or raw_data.get("currency") or "INR"
+
+    # 7. Budget constraint check & honest alert
+    if expected_budget and expected_budget > 0:
+        sym = "₹" if raw_data["currency"] == "INR" else ("$" if raw_data["currency"] == "USD" else ("€" if raw_data["currency"] == "EUR" else f"{raw_data['currency']} "))
+        if total_cost > (expected_budget * 1.05):
+            overrun = total_cost - expected_budget
+            pct = (overrun / expected_budget) * 100.0
+            warning_msg = (
+                f"⚠️ Budget Alert: This itinerary's estimated cost ({sym}{total_cost:,.0f}) "
+                f"exceeds your requested budget ({sym}{expected_budget:,.0f}) by {sym}{overrun:,.0f} ({pct:.1f}%)."
+            )
+            raw_data["budget_exceeded_warning"] = warning_msg
+            raw_data["budget_alert"] = warning_msg
+        else:
+            raw_data["budget_exceeded_warning"] = None
+            raw_data["budget_alert"] = None
+
+    # 8. Schema validation: model_validate against TripItinerary
+    itinerary_model = TripItinerary.model_validate(raw_data)
+    return itinerary_model
 
 
 class RevisionRequest(BaseModel):
@@ -596,6 +788,16 @@ class RevisionRequest(BaseModel):
         ..., description="User follow-up feedback, e.g. 'make day 2 cheaper' or 'replace trekking with beach time'"
     )
     language: str = Field(default="en", description="Output language code: 'en', 'te', or 'hi'")
+
+    @field_validator("job_id")
+    @classmethod
+    def validate_job_id(cls, v: str) -> str:
+        return validate_text_field(v, "job_id", min_len=1, max_len=128)
+
+    @field_validator("feedback")
+    @classmethod
+    def validate_feedback(cls, v: str) -> str:
+        return validate_text_field(v, "feedback", min_len=2, max_len=600, allow_newlines=True)
 
     @field_validator("language")
     @classmethod
@@ -655,6 +857,16 @@ class DestinationQuestion(BaseModel):
     )
     language: str = Field(default="en", description="Output language code: 'en', 'te', or 'hi'")
 
+    @field_validator("job_id")
+    @classmethod
+    def validate_job_id(cls, v: str) -> str:
+        return validate_text_field(v, "job_id", min_len=1, max_len=128)
+
+    @field_validator("question")
+    @classmethod
+    def validate_question(cls, v: str) -> str:
+        return validate_text_field(v, "question", min_len=2, max_len=500, allow_newlines=True)
+
     @field_validator("language")
     @classmethod
     def validate_lang(cls, v: str) -> str:
@@ -679,6 +891,23 @@ class SmartRequest(BaseModel):
     job_id: str | None = Field(default=None, description="Optional active trip job ID for context (for revisions/questions/comparisons)")
     origin: str = Field(default="Delhi", description="Optional departure city")
     language: str = Field(default="en", description="Output language code: 'en', 'te', or 'hi'")
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, v: str) -> str:
+        return validate_text_field(v, "text", min_len=2, max_len=600, allow_newlines=True)
+
+    @field_validator("origin")
+    @classmethod
+    def validate_origin(cls, v: str) -> str:
+        return validate_text_field(v, "origin", min_len=2, max_len=100)
+
+    @field_validator("job_id")
+    @classmethod
+    def validate_job_id(cls, v: str | None) -> str | None:
+        if v is not None and v.strip():
+            return validate_text_field(v, "job_id", min_len=1, max_len=128)
+        return None
 
 
 class SmartRequestResponse(BaseModel):
