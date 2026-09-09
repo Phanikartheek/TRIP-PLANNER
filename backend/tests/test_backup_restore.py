@@ -66,6 +66,7 @@ def test_sqlite_online_backup_and_recovery(tmp_path: Path):
     assert backup_db.stat().st_size > 0, "Backup file is empty"
 
     # Step 3: Simulate disaster - primary database is deleted / volume lost
+    db.dispose_engine(primary_db)
     primary_db.unlink()
     wal_file = primary_db.with_name(f"{primary_db.name}-wal")
     shm_file = primary_db.with_name(f"{primary_db.name}-shm")

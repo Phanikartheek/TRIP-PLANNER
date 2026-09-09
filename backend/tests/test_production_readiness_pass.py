@@ -9,14 +9,13 @@ Comprehensive verification tests for the 5 Production Readiness priorities:
 
 import os
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 from trip_planner.api import db
-from trip_planner.api.app import app, job_repo, DAILY_PLAN_LIMIT
+from trip_planner.api.app import DAILY_PLAN_LIMIT, app, job_repo
 from trip_planner.api.metrics import metrics
-from trip_planner.api.repository import SQLAlchemyJobRepository
 
 
 @pytest.fixture

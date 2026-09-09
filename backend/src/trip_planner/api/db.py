@@ -24,8 +24,6 @@ from sqlalchemy import (
     event,
     func,
     or_,
-    select,
-    update,
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -161,6 +159,15 @@ def get_session_factory(db_path: Path | str | None = None) -> sessionmaker:
         engine = get_engine(db_path)
         _sessionmakers[url] = sessionmaker(bind=engine, expire_on_commit=False)
     return _sessionmakers[url]
+
+
+def dispose_engine(db_path: Path | str | None = None) -> None:
+    """Disposes cached SQLAlchemy engine and its connection pool."""
+    url = get_database_url(db_path)
+    eng = _engines.pop(url, None)
+    if eng:
+        eng.dispose()
+    _sessionmakers.pop(url, None)
 
 
 class ClosingConnection(sqlite3.Connection):

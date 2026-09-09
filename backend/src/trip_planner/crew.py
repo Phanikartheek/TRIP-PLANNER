@@ -175,7 +175,6 @@ def _safe_litellm_completion(*args, **kwargs):
     # Enforce max_tokens = 3500 so LLM structured JSON output is complete while staying within limits
     kwargs["max_tokens"] = 3500
 
-    last_exception = None
     for cand_idx, candidate in enumerate(candidates):
         active_model = candidate["model"]
         kwargs["model"] = active_model
@@ -209,7 +208,6 @@ def _safe_litellm_completion(*args, **kwargs):
                             msg.content = "Information successfully gathered."
                 return res
             except Exception as e:
-                last_exception = e
                 err_msg = str(e)
                 is_tool_fail = ("tool_use_failed" in err_msg or "Failed to call a function" in err_msg) and "max_tokens" not in err_msg
                 is_otpm_limit = "otpm" in err_msg.lower() or "reduce max_tokens" in err_msg.lower() or "output tokens per minute" in err_msg.lower()
@@ -610,11 +608,8 @@ class TripPlannerCrew:
         if progress_callback:
             progress_callback("researching_transport", 30, "Researching transport options & route connectivity...")
 
-        t1 = self.select_city_task()
-        t2 = self.gather_city_info_task()
-        t3 = self.plan_itinerary_task()
-
-        if progress_callback:
+        main_crew = self.crew()
+        if progress_callback and hasattr(main_crew, "tasks") and len(main_crew.tasks) >= 3:
             def _after_t1(out):
                 try:
                     progress_callback("checking_weather_local", 55, "Checking weather, safety & local cultural gems...")
@@ -627,15 +622,9 @@ class TripPlannerCrew:
                 except Exception:
                     pass
 
-            t1.callback = _after_t1
-            t2.callback = _after_t2
+            main_crew.tasks[0].callback = _after_t1
+            main_crew.tasks[1].callback = _after_t2
 
-        main_crew = Crew(
-            agents=[self.city_selector(), self.local_expert(), self.travel_concierge()],
-            tasks=[t1, t2, t3],
-            process=Process.sequential,
-            verbose=True,
-        )
         crew_res = main_crew.kickoff(inputs=inputs)
 
         out_dict: dict[str, Any] = {}

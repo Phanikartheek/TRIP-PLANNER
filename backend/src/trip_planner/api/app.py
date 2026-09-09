@@ -1181,9 +1181,17 @@ async def _execute_trip_job(job_id: str, inputs: dict[str, Any], dedup_key: str 
 
     try:
         async with ai_concurrency_semaphore:
+            def _invoke_crew_sync():
+                try:
+                    return _run_crew_sync(inputs, on_progress)
+                except TypeError as t_err:
+                    if "positional argument" in str(t_err) or "unexpected keyword" in str(t_err):
+                        return _run_crew_sync(inputs)
+                    raise
+
             # Give CrewAI up to 900 seconds (15 minutes) to complete the multi-agent pipeline
             itinerary_data = await asyncio.wait_for(
-                asyncio.to_thread(_run_crew_sync, inputs, on_progress),
+                asyncio.to_thread(_invoke_crew_sync),
                 timeout=900.0,
             )
 
