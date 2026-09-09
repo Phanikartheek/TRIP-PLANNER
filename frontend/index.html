@@ -480,6 +480,25 @@
         <span id="agent-ticker-text">Initializing AI agent pipeline...</span>
       </div>
 
+      <!-- 5-Stage Visual Progress Stepper -->
+      <div class="progress-stage-stepper" id="progress-stage-stepper" style="display: flex; justify-content: space-between; gap: 8px; margin: 16px 0 20px 0; overflow-x: auto; padding: 4px 0;">
+        <div class="stage-step-pill active" id="step-pill-analyzing" style="flex: 1; min-width: 120px; text-align: center; padding: 10px 8px; border-radius: 8px; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); font-size: 0.8rem; font-weight: 700; color: #38bdf8; transition: all 0.3s ease;">
+          <span class="step-num">1</span>. Analyzing Request
+        </div>
+        <div class="stage-step-pill" id="step-pill-transport" style="flex: 1; min-width: 120px; text-align: center; padding: 10px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); font-size: 0.8rem; font-weight: 600; color: #94a3b8; transition: all 0.3s ease;">
+          <span class="step-num">2</span>. Researching Transport
+        </div>
+        <div class="stage-step-pill" id="step-pill-weather" style="flex: 1; min-width: 120px; text-align: center; padding: 10px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); font-size: 0.8rem; font-weight: 600; color: #94a3b8; transition: all 0.3s ease;">
+          <span class="step-num">3</span>. Weather & Local Info
+        </div>
+        <div class="stage-step-pill" id="step-pill-itinerary" style="flex: 1; min-width: 120px; text-align: center; padding: 10px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); font-size: 0.8rem; font-weight: 600; color: #94a3b8; transition: all 0.3s ease;">
+          <span class="step-num">4</span>. Building Itinerary
+        </div>
+        <div class="stage-step-pill" id="step-pill-finalizing" style="flex: 1; min-width: 120px; text-align: center; padding: 10px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); font-size: 0.8rem; font-weight: 600; color: #94a3b8; transition: all 0.3s ease;">
+          <span class="step-num">5</span>. Finalizing
+        </div>
+      </div>
+
       <div class="agents-pipeline">
         <!-- Agent 1 -->
         <div class="agent-step-card" id="agent-1">

@@ -1,6 +1,6 @@
 """
 Job Repository Abstraction Layer.
-Decouples API routes from the underlying persistence technology (SQLite vs future PostgreSQL).
+Decouples API routes from the underlying persistence technology (PostgreSQL vs SQLite).
 Routes interact strictly with the JobRepository interface.
 """
 
@@ -26,6 +26,9 @@ class JobRepository(ABC):
         travel_date: str | None = None,
         request_hash: str | None = None,
         client_ip: str | None = None,
+        current_stage: str | None = "analyzing_request",
+        progress_percentage: int = 0,
+        message: str | None = None,
     ) -> dict[str, Any]:
         """Creates and stores a new job."""
         pass
@@ -44,8 +47,14 @@ class JobRepository(ABC):
         error: str | None = None,
         qa_history: list[dict[str, Any]] | None = None,
         checklist_state: list[dict[str, Any]] | None = None,
+        travel_date: str | None = None,
+        reminder_sent: bool | None = None,
+        current_stage: str | None = None,
+        progress_percentage: int | None = None,
+        message: str | None = None,
+        user_email: str | None = None,
     ) -> None:
-        """Updates a job's status, result, error, or metadata."""
+        """Updates a job's status, result, error, progress stages, or metadata."""
         pass
 
     @abstractmethod
@@ -75,11 +84,26 @@ class JobRepository(ABC):
         """Lists completed trips for a given user email."""
         pass
 
+    @abstractmethod
+    def link_trip_to_user(self, job_id: str, user_email: str) -> bool:
+        """Links an anonymous trip to an authenticated user account."""
+        pass
 
-class SQLiteJobRepository(JobRepository):
+    @abstractmethod
+    def get_daily_usage(self, client_key: str, usage_date: str | None = None) -> int:
+        """Returns the number of trips planned by a client on a given date."""
+        pass
+
+    @abstractmethod
+    def increment_daily_usage(self, client_key: str, usage_date: str | None = None) -> int:
+        """Increments and returns daily trips planned by a client."""
+        pass
+
+
+class SQLAlchemyJobRepository(JobRepository):
     """
-    SQLite implementation of the JobRepository using write-ahead logging (WAL),
-    busy timeouts, and connection pooling semantics.
+    SQLAlchemy implementation supporting PostgreSQL and SQLite with pooling,
+    multi-stage progress tracking, and daily usage tracking.
     """
 
     def __init__(self, db_path: Path | str | None = None) -> None:
@@ -96,6 +120,9 @@ class SQLiteJobRepository(JobRepository):
         travel_date: str | None = None,
         request_hash: str | None = None,
         client_ip: str | None = None,
+        current_stage: str | None = "analyzing_request",
+        progress_percentage: int = 0,
+        message: str | None = None,
     ) -> dict[str, Any]:
         return db.create_job(
             job_id=job_id,
@@ -107,6 +134,9 @@ class SQLiteJobRepository(JobRepository):
             travel_date=travel_date,
             request_hash=request_hash,
             client_ip=client_ip,
+            current_stage=current_stage,
+            progress_percentage=progress_percentage,
+            message=message,
             db_path=self.db_path,
         )
 
@@ -121,6 +151,12 @@ class SQLiteJobRepository(JobRepository):
         error: str | None = None,
         qa_history: list[dict[str, Any]] | None = None,
         checklist_state: list[dict[str, Any]] | None = None,
+        travel_date: str | None = None,
+        reminder_sent: bool | None = None,
+        current_stage: str | None = None,
+        progress_percentage: int | None = None,
+        message: str | None = None,
+        user_email: str | None = None,
     ) -> None:
         db.update_job(
             job_id=job_id,
@@ -129,6 +165,12 @@ class SQLiteJobRepository(JobRepository):
             error=error,
             qa_history=qa_history,
             checklist_state=checklist_state,
+            travel_date=travel_date,
+            reminder_sent=reminder_sent,
+            current_stage=current_stage,
+            progress_percentage=progress_percentage,
+            message=message,
+            user_email=user_email,
             db_path=self.db_path,
         )
 
@@ -156,6 +198,18 @@ class SQLiteJobRepository(JobRepository):
     def list_user_jobs(self, email: str) -> list[dict[str, Any]]:
         return db.get_user_trips(email=email, db_path=self.db_path)
 
+    def link_trip_to_user(self, job_id: str, user_email: str) -> bool:
+        return db.link_trip_to_user(job_id=job_id, user_email=user_email, db_path=self.db_path)
+
+    def get_daily_usage(self, client_key: str, usage_date: str | None = None) -> int:
+        return db.get_daily_usage(client_key=client_key, usage_date=usage_date, db_path=self.db_path)
+
+    def increment_daily_usage(self, client_key: str, usage_date: str | None = None) -> int:
+        return db.increment_daily_usage(client_key=client_key, usage_date=usage_date, db_path=self.db_path)
+
+
+# Backward-compatible alias
+SQLiteJobRepository = SQLAlchemyJobRepository
 
 # Default global repository instance
-default_job_repository = SQLiteJobRepository()
+default_job_repository = SQLAlchemyJobRepository()

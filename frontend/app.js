@@ -1101,6 +1101,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const statusData = await statusRes.json();
         jobStatus = statusData.status;
 
+        // Synchronize live progress stepper with real backend execution stage
+        if (statusData.current_stage || statusData.progress_percentage !== undefined) {
+          updateLiveProgressStage(statusData.current_stage, statusData.progress_percentage, statusData.message, elapsedSec);
+        }
+
         if (jobStatus === 'complete') {
           itineraryData = statusData.result;
           currentJobId = jobId;
@@ -1497,6 +1502,11 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!statusRes.ok) break;
           const statusData = await statusRes.json();
           jobStatus = statusData.status;
+
+          if (statusData.current_stage || statusData.progress_percentage !== undefined) {
+            updateLiveProgressStage(statusData.current_stage, statusData.progress_percentage, statusData.message, pollAttempts * 3);
+          }
+
           if (jobStatus === 'complete') {
             itineraryData = statusData.result;
             break;
@@ -1600,16 +1610,79 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // --- 5-Stage Live Progress Stepper Controller ---
+  function updateLiveProgressStage(stage, percentage, message, elapsedSec) {
+    const pills = [
+      { id: 'step-pill-analyzing', key: 'analyzing_request', num: 1, name: 'Analyzing Request' },
+      { id: 'step-pill-transport', key: 'researching_transport', num: 2, name: 'Researching Transport' },
+      { id: 'step-pill-weather', key: 'checking_weather_local', num: 3, name: 'Weather & Local Info' },
+      { id: 'step-pill-itinerary', key: 'building_itinerary', num: 4, name: 'Building Itinerary' },
+      { id: 'step-pill-finalizing', key: 'finalizing', num: 5, name: 'Finalizing' },
+    ];
+
+    const stageOrder = ['analyzing_request', 'researching_transport', 'checking_weather_local', 'building_itinerary', 'finalizing', 'complete'];
+    const currentIdx = stageOrder.indexOf(stage || 'analyzing_request');
+
+    pills.forEach((p, idx) => {
+      const el = document.getElementById(p.id);
+      if (!el) return;
+      if (currentIdx > idx || stage === 'complete') {
+        el.style.background = 'rgba(16, 185, 129, 0.15)';
+        el.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+        el.style.color = '#34d399';
+        el.innerHTML = `✓ ${p.num}. ${p.name}`;
+      } else if (currentIdx === idx) {
+        el.style.background = 'rgba(56, 189, 248, 0.25)';
+        el.style.borderColor = '#38bdf8';
+        el.style.color = '#38bdf8';
+        el.style.boxShadow = '0 0 10px rgba(56, 189, 248, 0.35)';
+        el.innerHTML = `<span class="pulse-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#38bdf8;margin-right:4px;"></span> ${p.num}. ${p.name}`;
+      } else {
+        el.style.background = 'rgba(255, 255, 255, 0.04)';
+        el.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+        el.style.color = '#94a3b8';
+        el.style.boxShadow = 'none';
+        el.innerHTML = `${p.num}. ${p.name}`;
+      }
+    });
+
+    if (percentage !== undefined && agentProgressBarFill) {
+      agentProgressBarFill.style.width = `${Math.min(100, Math.max(5, percentage))}%`;
+    }
+    if (message && agentLiveTickerText) {
+      agentLiveTickerText.textContent = message;
+    }
+    if (elapsedSec && agentElapsedBadge) {
+      const estRem = Math.max(5, Math.round(50 * (1 - (percentage || 10) / 100)));
+      agentElapsedBadge.textContent = `Elapsed: ${elapsedSec}s • Est: ~${estRem}s remaining`;
+    }
+
+    // Sync agent step cards based on stage
+    if (currentIdx <= 0) {
+      setAgentState(agent1Card, 'running', 'Analyzing Constraints');
+      if (agent1Log) agent1Log.textContent = message || 'Analyzing request & destination constraints...';
+    } else if (currentIdx === 1) {
+      setAgentState(agent1Card, 'completed', 'Constraints Verified');
+      setAgentState(agent2Card, 'running', 'Researching Routes');
+      if (agent2Log) agent2Log.textContent = message || 'Researching transport options & route connectivity...';
+    } else if (currentIdx === 2) {
+      setAgentState(agent1Card, 'completed', 'Constraints Verified');
+      setAgentState(agent2Card, 'running', 'Checking Weather & Culture');
+      if (agent2Log) agent2Log.textContent = message || 'Checking weather, safety guidelines & cultural gems...';
+    } else if (currentIdx >= 3) {
+      setAgentState(agent1Card, 'completed', 'Constraints Verified');
+      setAgentState(agent2Card, 'completed', 'Local Guide Verified');
+      setAgentState(agent3Card, 'running', currentIdx === 4 ? 'Finalizing Itinerary' : 'Building Schedule');
+      if (agent3Log) agent3Log.textContent = message || 'Synthesizing schedule, stays & budget estimates...';
+    }
+  }
+
   // --- Agent Progression Animation ---
   function startAgentProgressAnimation() {
     resetAgentCards();
     if (emptyHeroSection) emptyHeroSection.style.display = 'none';
 
-    // Step 1 active immediately
-    setAgentState(agent1Card, 'running', 'Searching & Evaluating Options');
-    if (agent1Log) agent1Log.textContent = 'Comparing weather, connectivity & seasonal flight/train fares...';
-    if (agentLiveTickerText) agentLiveTickerText.textContent = 'Agent 1 (City Selection Expert) is analyzing destination feasibility...';
-    if (agentProgressBarFill) agentProgressBarFill.style.width = '15%';
+    updateLiveProgressStage('analyzing_request', 10, 'Analyzing request & destination constraints...', 0);
 
     let elapsed = 0;
     clearInterval(progressInterval);
@@ -1618,57 +1691,13 @@ document.addEventListener('DOMContentLoaded', () => {
       if (agentElapsedBadge) {
         agentElapsedBadge.textContent = `Elapsed: ${elapsed}s • Est: ~40s`;
       }
-
-      // Stage 1: Agent 1 (0 to 12s)
-      if (elapsed < 12) {
-        if (agentProgressBarFill) agentProgressBarFill.style.width = `${Math.min(35, 12 + elapsed * 2)}%`;
-        if (elapsed === 4 && agent1Log) {
-          agent1Log.textContent = 'Analyzing historical climate, precipitation risks & stay rates...';
-        }
-        if (elapsed === 8 && agent1Log) {
-          agent1Log.textContent = 'Filtering candidate cities against budget constraints...';
-        }
-      }
-      // Stage 2: Agent 2 (12 to 28s)
-      else if (elapsed === 12) {
-        setAgentState(agent1Card, 'completed', 'Destination Selected');
-        if (agent1Log) agent1Log.textContent = '✓ Destination selected & verified!';
-        setAgentState(agent2Card, 'running', 'Scouting Local Guide & Food');
-        if (agent2Log) agent2Log.textContent = 'Curating iconic landmarks, regional cuisine & safety contacts...';
-        if (agentLiveTickerText) agentLiveTickerText.textContent = 'Agent 2 (Local Tour Guide) researching attractions & food gems...';
-        if (agentProgressBarFill) agentProgressBarFill.style.width = '45%';
-      } else if (elapsed > 12 && elapsed < 28) {
-        if (agentProgressBarFill) agentProgressBarFill.style.width = `${Math.min(70, 45 + (elapsed - 12) * 1.5)}%`;
-        if (elapsed === 18 && agent2Log) {
-          agent2Log.textContent = 'Mapping local eateries for dietary preferences & street food lanes...';
-        }
-        if (elapsed === 23 && agent2Log) {
-          agent2Log.textContent = 'Verifying transit hubs, metro lines & regional phrasebook...';
-        }
-      }
-      // Stage 3: Agent 3 (28s+)
-      else if (elapsed === 28) {
-        setAgentState(agent2Card, 'completed', 'Attractions & Transit Curated');
-        if (agent2Log) agent2Log.textContent = '✓ Local attractions, food & transit verified!';
-        setAgentState(agent3Card, 'running', 'Structuring Final Itinerary');
-        if (agent3Log) agent3Log.textContent = 'Synthesizing morning-to-night timeline with strict budget allocations...';
-        if (agentLiveTickerText) agentLiveTickerText.textContent = 'Agent 3 (Travel Concierge) assembling final day-by-day plan...';
-        if (agentProgressBarFill) agentProgressBarFill.style.width = '75%';
-      } else if (elapsed > 28) {
-        if (agentProgressBarFill) agentProgressBarFill.style.width = `${Math.min(94, 75 + (elapsed - 28) * 0.8)}%`;
-        if (elapsed === 34 && agent3Log) {
-          agent3Log.textContent = 'Calculating per-day expense breakdown & accommodation options...';
-        }
-        if (elapsed === 40 && agent3Log) {
-          agent3Log.textContent = 'Finalizing digital travel pass and weather clothing advisor...';
-        }
-      }
     }, 1000);
   }
 
   function finishAgentProgressAnimation() {
     clearInterval(progressInterval);
     if (agentProgressBarFill) agentProgressBarFill.style.width = '100%';
+    updateLiveProgressStage('complete', 100, 'Itinerary ready!');
     setAgentState(agent1Card, 'completed', 'Destination Selected');
     setAgentState(agent2Card, 'completed', 'Local Guide Verified');
     setAgentState(agent3Card, 'completed', 'Itinerary Finalized');
@@ -1690,6 +1719,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (agent3Log) agent3Log.textContent = 'Waiting in pipeline...';
     if (agentProgressBarFill) agentProgressBarFill.style.width = '0%';
     if (agentElapsedBadge) agentElapsedBadge.textContent = 'Elapsed: 0s • Est: ~40s';
+
+    const pillIds = ['step-pill-analyzing', 'step-pill-transport', 'step-pill-weather', 'step-pill-itinerary', 'step-pill-finalizing'];
+    pillIds.forEach((id, idx) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.style.background = idx === 0 ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.04)';
+        el.style.borderColor = idx === 0 ? 'rgba(56, 189, 248, 0.4)' : 'rgba(255, 255, 255, 0.08)';
+        el.style.color = idx === 0 ? '#38bdf8' : '#94a3b8';
+        el.style.boxShadow = 'none';
+      }
+    });
   }
 
   function setAgentState(card, state, label) {
@@ -4421,10 +4461,11 @@ document.addEventListener('DOMContentLoaded', () => {
       verifyTokenBtn.innerHTML = `<span>Verifying...</span>`;
 
       try {
+        const recentJobId = currentJobId || localStorage.getItem('trip_planner_last_job_id') || null;
         const res = await fetch('/api/auth/verify-token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: rawToken }),
+          body: JSON.stringify({ token: rawToken, recent_job_id: recentJobId }),
         });
         const data = await res.json();
         if (res.ok) {

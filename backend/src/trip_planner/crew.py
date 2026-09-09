@@ -48,6 +48,58 @@ def _shrink_messages_further(messages: list[dict[str, Any]]) -> list[dict[str, A
     else:
         return system_msgs[:1] + [{"role": "user", "content": "Please proceed with the trip planning task."}] + non_system[-2:]
 
+def _get_fallback_candidates(initial_model: str) -> list[dict[str, Any]]:
+    """
+    Builds a prioritized list of model candidates to try if the primary model hits
+    rate limits (OTPM/TPM/RPM), timeouts, or provider failures.
+    Verified available models on Groq:
+    - groq/qwen/qwen3.8-27b
+    - groq/openai/gpt-oss-120b (Separate rate limit pool)
+    - groq/openai/gpt-oss-20b  (Separate rate limit pool)
+    - groq/qwen/qwen3.6-27b
+    - OpenRouter models (if OPENROUTER_API_KEY configured)
+    """
+    groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+    or_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+
+    env_fallbacks = os.environ.get("AI_FALLBACK_MODELS", "").strip()
+    fallback_models = [m.strip() for m in env_fallbacks.split(",") if m.strip()] if env_fallbacks else [
+        "groq/openai/gpt-oss-120b",
+        "groq/openai/gpt-oss-20b",
+        "groq/qwen/qwen3.6-27b",
+    ]
+
+    candidates = []
+    # 1. Primary candidate
+    candidates.append({
+        "model": initial_model,
+        "api_key": groq_key if "groq" in initial_model.lower() else (or_key or groq_key)
+    })
+
+    # 2. Append fallback models that differ from initial_model
+    for fb in fallback_models:
+        if fb.lower() != initial_model.lower():
+            cand = {"model": fb}
+            if fb.startswith("openrouter/"):
+                if or_key:
+                    cand["api_key"] = or_key
+                    cand["api_base"] = "https://openrouter.ai/api/v1"
+                    candidates.append(cand)
+            else:
+                cand["api_key"] = groq_key
+                candidates.append(cand)
+
+    # 3. If OpenRouter key is configured and not yet added, add an OpenRouter fallback
+    if or_key and not any(c["model"].startswith("openrouter/") for c in candidates):
+        candidates.append({
+            "model": "openrouter/meta-llama/llama-3.3-70b-instruct",
+            "api_key": or_key,
+            "api_base": "https://openrouter.ai/api/v1"
+        })
+
+    return candidates
+
+
 def _safe_litellm_completion(*args, **kwargs):
     args_list = list(args)
     if len(args_list) > 0 and isinstance(args_list[0], str) and "model" not in kwargs:
@@ -56,9 +108,8 @@ def _safe_litellm_completion(*args, **kwargs):
         kwargs["messages"] = list(args_list.pop(0))
     args = tuple(args_list)
 
-    print(f"[SAFE_LITELLM] Intercepted call with args={len(args)}, kwargs_keys={list(kwargs.keys())}", flush=True)
-    for k, v in kwargs.items():
-        print(f"[SAFE_LITELLM_DEBUG] key={k}, len={len(str(v))}", flush=True)
+    initial_model = kwargs.get("model", "groq/qwen/qwen3.8-27b")
+    candidates = _get_fallback_candidates(initial_model)
 
     if "tools" in kwargs and isinstance(kwargs["tools"], list):
         # Trim function descriptions
@@ -121,83 +172,106 @@ def _safe_litellm_completion(*args, **kwargs):
 
         kwargs["messages"] = clean_messages
 
-    # Enforce max_tokens = 3500 so LLM structured JSON output is complete while staying within Groq token limits
+    # Enforce max_tokens = 3500 so LLM structured JSON output is complete while staying within limits
     kwargs["max_tokens"] = 3500
 
-    max_retries = 3
-    tool_use_fail_count = 0
-    for attempt in range(max_retries):
-        try:
-            res = _original_litellm_completion(*args, **kwargs)
-            if hasattr(res, "choices") and res.choices:
-                choice = res.choices[0]
-                if hasattr(choice, "message") and choice.message:
-                    msg = choice.message
-                    if getattr(msg, "content", None) is None and not getattr(msg, "tool_calls", None):
-                        msg.content = "Information successfully gathered."
-            return res
-        except Exception as e:
-            err_msg = str(e)
-            is_tool_fail = ("tool_use_failed" in err_msg or "Failed to call a function" in err_msg) and "max_tokens" not in err_msg
-            is_otpm_limit = "otpm" in err_msg.lower() or "reduce max_tokens" in err_msg.lower() or "output tokens per minute" in err_msg.lower()
-            is_rate_limit = is_otpm_limit or "rate_limit" in err_msg.lower() or "429" in err_msg or "tokens per minute" in err_msg.lower() or "tpm" in err_msg.lower() or "too large" in err_msg.lower()
-            is_parse_fail = "output_parse_failed" in err_msg.lower() or "parsing failed" in err_msg.lower()
-            is_max_tokens = ("output is incomplete" in err_msg.lower() or "finish_reason: length" in err_msg.lower()) and not is_rate_limit
-            is_retryable = (is_tool_fail or is_rate_limit or is_parse_fail or is_max_tokens) and attempt < max_retries - 1
+    last_exception = None
+    for cand_idx, candidate in enumerate(candidates):
+        active_model = candidate["model"]
+        kwargs["model"] = active_model
+        if "api_key" in candidate and candidate["api_key"]:
+            kwargs["api_key"] = candidate["api_key"]
+        if "api_base" in candidate and candidate["api_base"]:
+            kwargs["api_base"] = candidate["api_base"]
+        elif "api_base" in kwargs and not active_model.startswith("openrouter/"):
+            del kwargs["api_base"]
 
-            if is_rate_limit:
-                try:
-                    from trip_planner.api.metrics import metrics
-                    metrics.record_provider_429()
-                except Exception:
-                    pass
+        if cand_idx > 0:
+            prev_model = candidates[cand_idx - 1]["model"]
+            print(f"[SAFE_LITELLM] >>> ACTIVATING FALLBACK PROVIDER #{cand_idx}: '{active_model}' (from '{prev_model}') <<<", flush=True)
+            try:
+                from trip_planner.api.metrics import metrics
+                metrics.record_provider_fallback(prev_model, active_model)
+            except Exception:
+                pass
 
-            if is_retryable:
-                try:
-                    from trip_planner.api.metrics import metrics
-                    metrics.record_retry()
-                except Exception:
-                    pass
+        max_retries = 2 if len(candidates) > 1 else 3
+        tool_use_fail_count = 0
 
-                if is_tool_fail:
-                    tool_use_fail_count += 1
-                    if "tool_choice" in kwargs:
-                        del kwargs["tool_choice"]
-                    if "messages" in kwargs and isinstance(kwargs["messages"], list):
-                        kwargs["messages"].append({
-                            "role": "user",
-                            "content": "You MUST use the search tool to look up real information. Do NOT answer from your own knowledge. Call the search function now."
-                        })
-                    wait_time = round(3.0 + random.uniform(0.2, 0.8), 2)
-                    print(f"[SAFE_LITELLM] tool_use_failed (attempt {attempt+1}/{max_retries}). Retrying in {wait_time}s...", flush=True)
-                    if tool_use_fail_count >= 2:
-                        if "tools" in kwargs:
-                            del kwargs["tools"]
+        for attempt in range(max_retries):
+            try:
+                res = _original_litellm_completion(*args, **kwargs)
+                if hasattr(res, "choices") and res.choices:
+                    choice = res.choices[0]
+                    if hasattr(choice, "message") and choice.message:
+                        msg = choice.message
+                        if getattr(msg, "content", None) is None and not getattr(msg, "tool_calls", None):
+                            msg.content = "Information successfully gathered."
+                return res
+            except Exception as e:
+                last_exception = e
+                err_msg = str(e)
+                is_tool_fail = ("tool_use_failed" in err_msg or "Failed to call a function" in err_msg) and "max_tokens" not in err_msg
+                is_otpm_limit = "otpm" in err_msg.lower() or "reduce max_tokens" in err_msg.lower() or "output tokens per minute" in err_msg.lower()
+                is_rate_limit = is_otpm_limit or "rate_limit" in err_msg.lower() or "429" in err_msg or "tokens per minute" in err_msg.lower() or "tpm" in err_msg.lower() or "too large" in err_msg.lower()
+                is_parse_fail = "output_parse_failed" in err_msg.lower() or "parsing failed" in err_msg.lower()
+                is_max_tokens = ("output is incomplete" in err_msg.lower() or "finish_reason: length" in err_msg.lower()) and not is_rate_limit
+                is_retryable = (is_tool_fail or is_rate_limit or is_parse_fail or is_max_tokens) and attempt < max_retries - 1
+
+                if is_rate_limit:
+                    try:
+                        from trip_planner.api.metrics import metrics
+                        metrics.record_provider_429()
+                    except Exception:
+                        pass
+
+                if is_retryable:
+                    try:
+                        from trip_planner.api.metrics import metrics
+                        metrics.record_retry()
+                    except Exception:
+                        pass
+
+                    if is_tool_fail:
+                        tool_use_fail_count += 1
                         if "tool_choice" in kwargs:
                             del kwargs["tool_choice"]
                         if "messages" in kwargs and isinstance(kwargs["messages"], list):
-                            kwargs["messages"] = [m for m in kwargs["messages"] if not (isinstance(m, dict) and "MUST use the search tool" in str(m.get("content", "")))]
-                        print(f"[SAFE_LITELLM] Dropped tools after {tool_use_fail_count} tool_use_failed errors.", flush=True)
-                elif is_max_tokens:
-                    kwargs["max_tokens"] = 3500
-                    wait_time = round(1.5 + random.uniform(0.1, 0.5), 2)
-                    print(f"[SAFE_LITELLM] max_tokens truncation (attempt {attempt+1}/{max_retries}). Shrinking and retrying in {wait_time}s...", flush=True)
-                    if "messages" in kwargs and isinstance(kwargs["messages"], list):
-                        kwargs["messages"] = _shrink_messages_further(kwargs["messages"])
+                            kwargs["messages"].append({
+                                "role": "user",
+                                "content": "You MUST use the search tool to look up real information. Do NOT answer from your own knowledge. Call the search function now."
+                            })
+                        wait_time = round(2.5 + random.uniform(0.2, 0.8), 2)
+                        print(f"[SAFE_LITELLM] tool_use_fail on {active_model} (attempt {attempt+1}/{max_retries}). Retrying in {wait_time}s...", flush=True)
+                        if tool_use_fail_count >= 2:
+                            if "tools" in kwargs:
+                                del kwargs["tools"]
+                            if "tool_choice" in kwargs:
+                                del kwargs["tool_choice"]
+                            if "messages" in kwargs and isinstance(kwargs["messages"], list):
+                                kwargs["messages"] = [m for m in kwargs["messages"] if not (isinstance(m, dict) and "MUST use the search tool" in str(m.get("content", "")))]
+                    elif is_max_tokens:
+                        kwargs["max_tokens"] = 3500
+                        wait_time = round(1.5 + random.uniform(0.1, 0.5), 2)
+                        print(f"[SAFE_LITELLM] max_tokens on {active_model} (attempt {attempt+1}/{max_retries}). Retrying in {wait_time}s...", flush=True)
+                        if "messages" in kwargs and isinstance(kwargs["messages"], list):
+                            kwargs["messages"] = _shrink_messages_further(kwargs["messages"])
+                    else:
+                        tool_use_fail_count = 0
+                        if is_otpm_limit:
+                            kwargs["max_tokens"] = 950
+                        base_wait = 2.0 * (2 ** attempt)
+                        wait_time = round(base_wait + random.uniform(0.2, 0.8), 2)
+                        print(f"[SAFE_LITELLM] Rate limit or parse failure on {active_model} ({err_msg[:90]}...). Backing off {wait_time}s...", flush=True)
+                        if "messages" in kwargs and isinstance(kwargs["messages"], list):
+                            kwargs["messages"] = _shrink_messages_further(kwargs["messages"])
+                    time.sleep(wait_time)
                 else:
-                    tool_use_fail_count = 0
-                    if is_otpm_limit:
-                        kwargs["max_tokens"] = 950
-                    # Jittered exponential backoff: base 2.0s * 2^attempt + jitter
-                    base_wait = 2.0 * (2 ** attempt)
-                    wait_time = round(base_wait + random.uniform(0.2, 0.8), 2)
-                    print(f"[SAFE_LITELLM] Rate limit or parse failure ({err_msg[:100]}...). Backing off for {wait_time}s (Attempt {attempt+1}/{max_retries})...", flush=True)
-                    if "messages" in kwargs and isinstance(kwargs["messages"], list):
-                        kwargs["messages"] = _shrink_messages_further(kwargs["messages"])
-                time.sleep(wait_time)
-            else:
-                print(f"[SAFE_LITELLM] Non-retryable or max retries reached ({err_msg[:120]}...). Failing fast.", flush=True)
-                raise e
+                    print(f"[SAFE_LITELLM] Model '{active_model}' exhausted attempts ({err_msg[:100]}...). Transitioning to fallback...", flush=True)
+                    break
+
+    print(f"[SAFE_LITELLM] All {len(candidates)} candidate providers exhausted. Raising fallback exhaustion error.", flush=True)
+    raise RuntimeError(f"All AI providers (tried {len(candidates)} models including fallback) are currently experiencing peak demand. Please wait a moment and try again.")
 
 litellm.completion = _safe_litellm_completion
 if hasattr(litellm, "main"):
@@ -507,7 +581,7 @@ class TripPlannerCrew:
 
         return EvaluationResult(passes=True, feedback="Itinerary satisfies budget ceiling and quality criteria.")
 
-    def run_with_evaluator_loop(self, inputs: dict[str, Any], max_retries: int = 2) -> dict[str, Any]:
+    def run_with_evaluator_loop(self, inputs: dict[str, Any], max_retries: int = 2, progress_callback: Any = None) -> dict[str, Any]:
         """
         Evaluator-Optimizer loop:
         1. Generates itinerary via main crew.
@@ -531,9 +605,38 @@ class TripPlannerCrew:
         target_budget = clean_float(inputs.get("budget", 25000.0), 25000.0)
         dest_city = str(inputs.get("cities", inputs.get("destination_city", "Destination"))).split(",")[0].strip()
 
-        # Initial generation
+        # Initial generation with stage reporting
         logger.info(f"[EVALUATOR_LOOP] Starting initial generation for {dest_city} with target budget ₹{target_budget:,.0f}")
-        crew_res = self.crew().kickoff(inputs=inputs)
+        if progress_callback:
+            progress_callback("researching_transport", 30, "Researching transport options & route connectivity...")
+
+        t1 = self.select_city_task()
+        t2 = self.gather_city_info_task()
+        t3 = self.plan_itinerary_task()
+
+        if progress_callback:
+            def _after_t1(out):
+                try:
+                    progress_callback("checking_weather_local", 55, "Checking weather, safety & local cultural gems...")
+                except Exception:
+                    pass
+
+            def _after_t2(out):
+                try:
+                    progress_callback("building_itinerary", 80, "Synthesizing schedule, stays & budget estimates...")
+                except Exception:
+                    pass
+
+            t1.callback = _after_t1
+            t2.callback = _after_t2
+
+        main_crew = Crew(
+            agents=[self.city_selector(), self.local_expert(), self.travel_concierge()],
+            tasks=[t1, t2, t3],
+            process=Process.sequential,
+            verbose=True,
+        )
+        crew_res = main_crew.kickoff(inputs=inputs)
 
         out_dict: dict[str, Any] = {}
         if hasattr(crew_res, "pydantic") and crew_res.pydantic:

@@ -17,6 +17,8 @@ class MetricsRegistry:
         self._failed_generations: int = 0
         self._provider_rate_limits: int = 0
         self._provider_timeouts: int = 0
+        self._provider_fallbacks: int = 0
+        self._fallbacks_by_transition: dict[str, int] = {}
         self._validation_failures: int = 0
         self._retries_total: int = 0
         self._expired_jobs: int = 0
@@ -53,6 +55,13 @@ class MetricsRegistry:
     def record_provider_timeout(self) -> None:
         with self._lock:
             self._provider_timeouts += 1
+
+    def record_provider_fallback(self, from_model: str = "", to_model: str = "") -> None:
+        with self._lock:
+            self._provider_fallbacks += 1
+            if from_model and to_model:
+                trans = f"{from_model} -> {to_model}"
+                self._fallbacks_by_transition[trans] = self._fallbacks_by_transition.get(trans, 0) + 1
 
     def record_validation_failure(self) -> None:
         with self._lock:
@@ -108,6 +117,9 @@ class MetricsRegistry:
                 "expired_jobs": self._expired_jobs,
                 "provider_rate_limits": self._provider_rate_limits,
                 "provider_timeouts": self._provider_timeouts,
+                "provider_fallbacks": self._provider_fallbacks,
+                "fallbacks_total": self._provider_fallbacks,
+                "fallbacks_by_transition": dict(self._fallbacks_by_transition),
                 "validation_failures": self._validation_failures,
                 "retries_total": self._retries_total,
                 "latency_samples": dur_count,
@@ -128,6 +140,8 @@ class MetricsRegistry:
             self._failed_generations = 0
             self._provider_rate_limits = 0
             self._provider_timeouts = 0
+            self._provider_fallbacks = 0
+            self._fallbacks_by_transition = {}
             self._validation_failures = 0
             self._retries_total = 0
             self._expired_jobs = 0

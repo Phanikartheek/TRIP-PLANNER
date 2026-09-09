@@ -74,8 +74,8 @@ limiter = Limiter(key_func=get_trusted_client_ip)
 
 # Process-local AI concurrency control
 # NOTE: This asyncio.Semaphore is strictly process-local (in-memory within this single Python process).
-# It regulates concurrency within this container instance; it does NOT coordinate across multiple Railway replicas.
 MAX_CONCURRENT_AI_JOBS = int(os.getenv("MAX_CONCURRENT_AI_JOBS", "2"))
+DAILY_PLAN_LIMIT = int(os.getenv("DAILY_PLAN_LIMIT", "5"))
 ai_concurrency_semaphore = asyncio.Semaphore(MAX_CONCURRENT_AI_JOBS)
 job_repo: JobRepository = default_job_repository
 
@@ -379,6 +379,11 @@ class LoginRequest(BaseModel):
 
 class VerifyTokenRequest(BaseModel):
     token: str = Field(..., description="Magic token or full verification URL")
+    recent_job_id: str | None = Field(default=None, description="Optional job ID to link to account")
+
+
+class ClaimTripRequest(BaseModel):
+    job_id: str = Field(..., description="Job ID of the trip to associate with user account")
 
 
 class ChecklistItemPatch(BaseModel):
@@ -395,6 +400,9 @@ class JobStatusResponse(BaseModel):
     travel_date: str | None = None
     reminder_sent: bool | None = None
     checklist: list[dict[str, Any]] | None = None
+    current_stage: str | None = Field(default="analyzing_request", description="Current execution stage")
+    progress_percentage: int = Field(default=0, ge=0, le=100, description="Estimated completion percentage")
+    message: str | None = Field(default=None, description="Human-friendly progress description")
 
 
 # Comprehensive registry of Indian travel hub coordinates (Latitude, Longitude)
@@ -932,7 +940,7 @@ def reconcile_multi_city_itinerary(
 
 
 
-def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
+def _run_crew_sync(inputs: dict[str, Any], progress_callback: Any = None) -> dict[str, Any]:
     """
     Executes trip planning in a worker thread:
     - Multi-city trips: Dispatches to the Orchestrator-Workers pipeline (concurrent city workers & synthesis)
@@ -940,8 +948,13 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
     """
     from trip_planner.patterns.orchestrator import TripOrchestrator
 
+    if progress_callback:
+        progress_callback("analyzing_request", 20, "Analyzing travel dates, destinations & travel constraints...")
+
     if TripOrchestrator.should_use_orchestrator(inputs):
         logger.info(f"[_run_crew_sync] Multi-city request detected. Executing Orchestrator-Workers pipeline for: {inputs.get('cities')}")
+        if progress_callback:
+            progress_callback("researching_transport", 40, "Dispatching regional specialists & transit analysis...")
         orchestrator = TripOrchestrator()
         multi_itinerary = orchestrator.orchestrate_itinerary(inputs)
         out_dict = multi_itinerary.model_dump()
@@ -950,9 +963,12 @@ def _run_crew_sync(inputs: dict[str, Any]) -> dict[str, Any]:
         logger.info("[_run_crew_sync] Single-city request detected. Executing standard crew pipeline with evaluator loop.")
         from trip_planner.crew import TripPlannerCrew
         crew_instance = TripPlannerCrew()
-        out_dict = crew_instance.run_with_evaluator_loop(inputs=inputs)
+        out_dict = crew_instance.run_with_evaluator_loop(inputs=inputs, progress_callback=progress_callback)
         if isinstance(out_dict, dict):
             out_dict["orchestrator_used"] = False
+
+    if progress_callback:
+        progress_callback("finalizing", 92, "Validating itinerary, budget constraints & destination media...")
 
     if isinstance(out_dict, dict):
         # Store origin_city from inputs if available
@@ -1139,15 +1155,37 @@ async def _execute_trip_job(job_id: str, inputs: dict[str, Any], dedup_key: str 
     Background worker task running the CrewAI pipeline and storing results.
     Runs strictly through the real 3-agent AI pipeline without synthetic fallbacks.
     Regulated by process-local ai_concurrency_semaphore to prevent provider saturation.
+    Updates multi-stage progress in real time for rich UI feedback.
     """
     logger.info(f"[Job: {job_id}] Starting AI trip planning execution for {inputs.get('cities')}")
-    job_repo.update_job(job_id, status="running")
+    job_repo.update_job(
+        job_id,
+        status="running",
+        current_stage="analyzing_request",
+        progress_percentage=10,
+        message="Analyzing request & destination constraints...",
+    )
     metrics.inc_active_jobs()
     start_time = time.time()
+
+    def on_progress(stage: str, percentage: int, msg: str):
+        try:
+            job_repo.update_job(
+                job_id,
+                current_stage=stage,
+                progress_percentage=percentage,
+                message=msg,
+            )
+        except Exception as p_err:
+            logger.debug(f"[Job: {job_id}] Progress callback error: {p_err}")
+
     try:
         async with ai_concurrency_semaphore:
             # Give CrewAI up to 900 seconds (15 minutes) to complete the multi-agent pipeline
-            itinerary_data = await asyncio.wait_for(asyncio.to_thread(_run_crew_sync, inputs), timeout=900.0)
+            itinerary_data = await asyncio.wait_for(
+                asyncio.to_thread(_run_crew_sync, inputs, on_progress),
+                timeout=900.0,
+            )
 
             # Sanity check: Total cost must be > 0 and days list must be non-empty!
             tot_cost = clean_float(itinerary_data.get("total_estimated_cost", 0.0), 0.0) if isinstance(itinerary_data, dict) else 0.0
@@ -1155,26 +1193,57 @@ async def _execute_trip_job(job_id: str, inputs: dict[str, Any], dedup_key: str 
             if not isinstance(itinerary_data, dict) or not days_list or len(days_list) == 0 or tot_cost <= 0.0:
                 err_msg = "AI response was malformed after research phase - try a less constrained request"
                 logger.error(f"[Job: {job_id}] Malformed itinerary: cost={tot_cost}, days={len(days_list) if isinstance(days_list, list) else 0}")
-                job_repo.update_job(job_id, status="failed", error=err_msg)
+                job_repo.update_job(
+                    job_id,
+                    status="failed",
+                    current_stage="failed",
+                    progress_percentage=0,
+                    message=err_msg,
+                    error=err_msg,
+                )
                 metrics.record_generation_failure("validation")
                 return
 
-            job_repo.update_job(job_id, status="complete", result=itinerary_data)
+            job_repo.update_job(
+                job_id,
+                status="complete",
+                current_stage="complete",
+                progress_percentage=100,
+                message="Itinerary ready!",
+                result=itinerary_data,
+            )
             duration = time.time() - start_time
             metrics.record_generation_success(duration)
             logger.info(f"[Job: {job_id}] Itinerary successfully generated in {duration:.2f}s and saved to database.")
     except asyncio.TimeoutError:
         logger.error(f"[Job: {job_id}] CrewAI pipeline execution timed out after 900s")
-        job_repo.update_job(job_id, status="failed", error="Trip generation timed out. The planning engine took longer than expected. Please try again.")
+        timeout_msg = "Trip generation timed out. The planning engine took longer than expected. Please try again."
+        job_repo.update_job(
+            job_id,
+            status="failed",
+            current_stage="failed",
+            progress_percentage=0,
+            message=timeout_msg,
+            error=timeout_msg,
+        )
         metrics.record_generation_failure("timeout")
     except Exception as e:
         err_text = str(e) or repr(e)
         logger.error(f"[Job: {job_id}] CrewAI pipeline execution failed: {err_text}", exc_info=True)
         safe_error = categorize_ai_error(e)
-        job_repo.update_job(job_id, status="failed", error=safe_error)
+        job_repo.update_job(
+            job_id,
+            status="failed",
+            current_stage="failed",
+            progress_percentage=0,
+            message=safe_error,
+            error=safe_error,
+        )
         metrics.record_generation_failure(safe_error)
     finally:
         metrics.dec_active_jobs()
+        if dedup_key:
+            _clear_in_flight_request(dedup_key)
         if dedup_key:
             _clear_in_flight_request(dedup_key)
 
@@ -1363,7 +1432,8 @@ def _get_current_user_email(request: Request) -> str | None:
         token = auth_header.split(" ", 1)[1].strip()
     if not token:
         return None
-    return db.get_session_email(token)
+    db_path = getattr(job_repo, "db_path", None)
+    return db.get_session_email(token, db_path=db_path)
 
 
 def _generate_itinerary_pdf(job_id: str, itinerary: dict[str, Any]) -> bytes:
@@ -1613,12 +1683,18 @@ async def request_login_endpoint(request: Request, payload: LoginRequest):
 
 
 @app.get("/api/auth/verify")
-async def verify_login_endpoint(token: str):
-    email = db.verify_and_consume_login_token(token)
+async def verify_login_endpoint(request: Request, token: str, recent_job_id: str | None = None):
+    db_path = getattr(job_repo, "db_path", None)
+    email = db.verify_and_consume_login_token(token, db_path=db_path)
     if not email:
         return RedirectResponse(url="/?auth_error=invalid_or_expired_token", status_code=303)
 
-    session_token = db.create_session(email)
+    # Link recent anonymous trip if passed or stored in cookie
+    job_to_link = recent_job_id or request.cookies.get("recent_job_id")
+    if job_to_link:
+        job_repo.link_trip_to_user(job_to_link, email)
+
+    session_token = db.create_session(email, db_path=db_path)
     response = RedirectResponse(url="/my-trips", status_code=303)
     response.set_cookie(
         key="session_token",
@@ -1632,16 +1708,22 @@ async def verify_login_endpoint(token: str):
 
 
 @app.post("/api/auth/verify-token")
-async def verify_token_endpoint(payload: VerifyTokenRequest):
+async def verify_token_endpoint(request: Request, payload: VerifyTokenRequest):
     raw_token = payload.token.strip()
     if "token=" in raw_token:
         raw_token = raw_token.split("token=")[-1].split("&")[0].strip()
 
-    email = db.verify_and_consume_login_token(raw_token)
+    db_path = getattr(job_repo, "db_path", None)
+    email = db.verify_and_consume_login_token(raw_token, db_path=db_path)
     if not email:
         raise HTTPException(status_code=400, detail="Invalid or expired magic token. Please request a new one.")
 
-    session_token = db.create_session(email)
+    # Link recent anonymous trip if passed or stored in cookie
+    job_to_link = payload.recent_job_id or request.cookies.get("recent_job_id")
+    if job_to_link:
+        job_repo.link_trip_to_user(job_to_link, email)
+
+    session_token = db.create_session(email, db_path=db_path)
     response = JSONResponse({"message": "Successfully authenticated!", "email": email})
     response.set_cookie(
         key="session_token",
@@ -1670,8 +1752,9 @@ async def logout_endpoint(request: Request):
     if not token and auth_header and auth_header.startswith("Bearer "):
         token = auth_header.split(" ", 1)[1].strip()
 
+    db_path = getattr(job_repo, "db_path", None)
     if token:
-        db.delete_session(token)
+        db.delete_session(token, db_path=db_path)
 
     response = JSONResponse({"message": "Successfully logged out"})
     response.delete_cookie(key="session_token", path="/")
@@ -1683,8 +1766,40 @@ async def get_my_trips_endpoint(request: Request):
     email = _get_current_user_email(request)
     if not email:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    trips = db.get_user_jobs(email)
-    return {"email": email, "trips": trips}
+    raw_trips = job_repo.list_user_jobs(email)
+    formatted_trips = []
+    for t in raw_trips:
+        res = t.get("result") or {}
+        dest = res.get("destination_city") or (res.get("cities_visited")[0] if res.get("cities_visited") else "Destination")
+        days_len = len(res.get("days") or []) or res.get("trip_length_days") or 1
+        cost = res.get("total_estimated_cost") or 0.0
+        currency = res.get("currency") or "INR"
+        cover_image = res.get("destination_cover_image") or (res.get("city_showcase_photos", [None])[0] if res.get("city_showcase_photos") else None)
+        formatted_trips.append({
+            "job_id": t["job_id"],
+            "destination_city": dest,
+            "destination_country": res.get("destination_country", "India"),
+            "trip_length_days": days_len,
+            "total_estimated_cost": cost,
+            "currency": currency,
+            "travel_date": t.get("travel_date") or res.get("start_date"),
+            "created_at": t.get("created_at"),
+            "status": t.get("status", "complete"),
+            "cover_image": cover_image,
+            "result": res,
+        })
+    return {"email": email, "trips": formatted_trips}
+
+
+@app.post("/api/my-trips/claim")
+async def claim_trip_endpoint(request: Request, payload: ClaimTripRequest):
+    email = _get_current_user_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    success = job_repo.link_trip_to_user(payload.job_id, email)
+    if not success:
+        raise HTTPException(status_code=404, detail="Trip job not found or could not be linked")
+    return {"message": "Trip successfully linked to your account", "job_id": payload.job_id, "email": email}
 
 
 @app.get("/api/trip/{job_id}/pdf")
@@ -1898,6 +2013,9 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
             created_at=existing_job.get("created_at"),
             travel_date=existing_job.get("travel_date"),
             reminder_sent=existing_job.get("reminder_sent"),
+            current_stage=existing_job.get("current_stage") or "analyzing_request",
+            progress_percentage=existing_job.get("progress_percentage") or 0,
+            message=existing_job.get("message"),
         )
 
     # Rule: Maximum 1 active generation per client/IP to prevent capacity exhaustion
@@ -1907,6 +2025,15 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
             status_code=429,
             detail="You already have a trip generation in progress. Please wait for it to finish before starting a new one.",
             headers={"Retry-After": "30"},
+        )
+
+    # Rate Limiting & Cost Control: Configurable Daily Plan Quota
+    daily_used = job_repo.get_daily_usage(client_key)
+    if daily_used >= DAILY_PLAN_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily limit of {DAILY_PLAN_LIMIT} trip plans reached. Please check back tomorrow or contact support.",
+            headers={"Retry-After": "86400"},
         )
 
     dedup_key = f"{client_key}:{req_hash}"
@@ -1950,9 +2077,13 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
         travel_date=payload.travel_date,
         request_hash=req_hash,
         client_ip=client_ip,
+        current_stage="analyzing_request",
+        progress_percentage=5,
+        message="Trip planning job queued...",
     )
+    job_repo.increment_daily_usage(client_key)
 
-    logger.info(f"[Job: {job_id}] Registered new trip planning job for {payload.cities} (hash={req_hash[:12]})")
+    logger.info(f"[Job: {job_id}] Registered new trip planning job for {payload.cities} (hash={req_hash[:12]}, daily_usage={daily_used + 1}/{DAILY_PLAN_LIMIT})")
     # Kick off asynchronous background execution regulated by concurrency semaphore
     asyncio.create_task(_execute_trip_job(job_id, crew_inputs, dedup_key=dedup_key))
 
@@ -1962,6 +2093,9 @@ async def plan_trip_endpoint(request: Request, payload: TripPlanRequest):
         created_at=job_rec["created_at"],
         travel_date=job_rec.get("travel_date"),
         reminder_sent=job_rec.get("reminder_sent"),
+        current_stage="analyzing_request",
+        progress_percentage=5,
+        message="Trip planning job queued...",
     )
 
 
@@ -2370,6 +2504,9 @@ async def get_job_status(job_id: str):
         travel_date=job.get("travel_date"),
         reminder_sent=job.get("reminder_sent"),
         checklist=db.get_checklist(job_id, db_path=db_path) if job.get("status") == "complete" else None,
+        current_stage=job.get("current_stage") or ("complete" if job.get("status") == "complete" else "analyzing_request"),
+        progress_percentage=job.get("progress_percentage") if job.get("progress_percentage") is not None else (100 if job.get("status") == "complete" else 0),
+        message=job.get("message"),
     )
 
 
