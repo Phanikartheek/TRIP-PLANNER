@@ -248,6 +248,7 @@ def test_groq_to_openrouter_fallback_candidate_chain():
 def test_groq_rate_limit_switches_to_openrouter():
     """Verify that when Groq models hit rate limits (429), it advances seamlessly to OpenRouter."""
     from unittest.mock import MagicMock
+
     import litellm
     from trip_planner.crew import _safe_litellm_completion
 
