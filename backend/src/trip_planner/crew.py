@@ -50,58 +50,75 @@ def _shrink_messages_further(messages: list[dict[str, Any]]) -> list[dict[str, A
 
 def _get_fallback_candidates(initial_model: str) -> list[dict[str, Any]]:
     """
-    Builds a prioritized list of model candidates to try if the primary model hits
-    rate limits (OTPM/TPM/RPM), timeouts, or provider failures.
-    Proven working Groq models:
-    - Primary: groq/qwen/qwen3.8-27b (or TRIP_PLANNER_MODEL)
-    - Fallback 1: groq/llama-3.1-8b-instant   (highest rate limits on Groq)
-    - Fallback 2: groq/llama-3.3-70b-versatile
-    - Fallback 3: openrouter/meta-llama/llama-3.3-70b-instruct (only if OPENROUTER_API_KEY is configured)
+    Builds a prioritized list of model candidates to try:
+    1. Primary Groq model (initial_model or TRIP_PLANNER_MODEL)
+    2. Fallback Groq models: groq/llama-3.1-8b-instant, groq/llama-3.3-70b-versatile
+    3. Fallback OpenRouter model: openrouter/meta-llama/llama-3.3-70b-instruct (only if OPENROUTER_API_KEY is present)
     """
     groq_key = os.environ.get("GROQ_API_KEY", "").strip()
     or_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+
+    # Proven Groq models in prioritized order
+    groq_models = [
+        "groq/llama-3.1-8b-instant",
+        "groq/llama-3.3-70b-versatile",
+    ]
 
     env_fallbacks = os.environ.get("AI_FALLBACK_MODELS", "").strip()
     parsed_models = [m.strip() for m in env_fallbacks.split(",") if m.strip()] if env_fallbacks else []
     # Explicitly filter out any obsolete or non-existent gpt-oss models or qwen3.6
     sanitized_fallbacks = [m for m in parsed_models if "gpt-oss" not in m.lower() and "qwen3.6" not in m.lower()]
 
-    if not sanitized_fallbacks:
-        sanitized_fallbacks = [
-            "groq/llama-3.1-8b-instant",
-            "groq/llama-3.3-70b-versatile",
-        ]
-    else:
-        for proven in ("groq/llama-3.1-8b-instant", "groq/llama-3.3-70b-versatile"):
-            if proven not in sanitized_fallbacks:
-                sanitized_fallbacks.append(proven)
+    candidates: list[dict[str, Any]] = []
 
-    candidates = []
-    # 1. Primary candidate
-    candidates.append({
-        "model": initial_model,
-        "api_key": groq_key if "groq" in initial_model.lower() else (or_key or groq_key)
-    })
-
-    # 2. Append fallback models that differ from initial_model
-    for fb in sanitized_fallbacks:
-        if fb.lower() != initial_model.lower() and not any(c["model"].lower() == fb.lower() for c in candidates):
-            cand = {"model": fb}
-            if fb.startswith("openrouter/"):
-                if or_key:
-                    cand["api_key"] = or_key
-                    cand["api_base"] = "https://openrouter.ai/api/v1"
-                    candidates.append(cand)
-            else:
-                cand["api_key"] = groq_key
-                candidates.append(cand)
-
-    # 3. Fallback 3: OpenRouter model only if OPENROUTER_API_KEY is configured
-    if or_key and not any(c["model"].startswith("openrouter/") for c in candidates):
+    # 1. Primary candidate (if Groq, or initial model)
+    if not initial_model.startswith("openrouter/"):
         candidates.append({
-            "model": "openrouter/meta-llama/llama-3.3-70b-instruct",
+            "model": initial_model,
+            "api_key": groq_key,
+            "provider": "groq",
+        })
+
+    # 2. Add proven Groq fallback models
+    for fb in groq_models:
+        if fb.lower() != initial_model.lower() and not any(c["model"].lower() == fb.lower() for c in candidates):
+            candidates.append({
+                "model": fb,
+                "api_key": groq_key,
+                "provider": "groq",
+            })
+
+    # Additional custom Groq models from env
+    for fb in sanitized_fallbacks:
+        if not fb.startswith("openrouter/") and fb.lower() != initial_model.lower() and not any(c["model"].lower() == fb.lower() for c in candidates):
+            candidates.append({
+                "model": fb,
+                "api_key": groq_key,
+                "provider": "groq",
+            })
+
+    # 3. OpenRouter fallback ONLY if OPENROUTER_API_KEY is present
+    if or_key and len(or_key) >= 10:
+        or_model = os.environ.get("OPENROUTER_FALLBACK_MODEL", "").strip() or "openrouter/meta-llama/llama-3.3-70b-instruct"
+        for fb in sanitized_fallbacks:
+            if fb.startswith("openrouter/"):
+                or_model = fb
+                break
+        if not any(c["model"].lower() == or_model.lower() for c in candidates):
+            candidates.append({
+                "model": or_model,
+                "api_key": or_key,
+                "api_base": "https://openrouter.ai/api/v1",
+                "provider": "openrouter",
+            })
+
+    # If initial_model was explicitly configured as an OpenRouter model, put it at front
+    if initial_model.startswith("openrouter/") and or_key and len(or_key) >= 10:
+        candidates.insert(0, {
+            "model": initial_model,
             "api_key": or_key,
-            "api_base": "https://openrouter.ai/api/v1"
+            "api_base": "https://openrouter.ai/api/v1",
+            "provider": "openrouter",
         })
 
     return candidates
@@ -124,6 +141,15 @@ def _safe_litellm_completion(*args, **kwargs):
     valid_candidates = [c for c in candidates if c["model"] not in known_invalid]
     if not valid_candidates:
         valid_candidates = candidates[:1]
+
+    # If Groq is currently in a known active rate-limit window and OpenRouter is available,
+    # prioritize OpenRouter so we don't waste roundtrips or stall jobs on known 429 windows.
+    groq_cooldown_until = getattr(_safe_litellm_completion, "_groq_rate_limited_until", 0.0)
+    if time.time() < groq_cooldown_until:
+        or_cands = [c for c in valid_candidates if c["model"].startswith("openrouter/")]
+        groq_cands = [c for c in valid_candidates if not c["model"].startswith("openrouter/")]
+        if or_cands:
+            valid_candidates = or_cands + groq_cands
 
     if "tools" in kwargs and isinstance(kwargs["tools"], list):
         # Trim function descriptions
@@ -225,14 +251,33 @@ def _safe_litellm_completion(*args, **kwargs):
         # Ensure correct provider routing in LiteLLM
         if active_model.startswith("groq/"):
             kwargs["custom_llm_provider"] = "groq"
+            kwargs.pop("api_base", None)
         elif active_model.startswith("openrouter/"):
             kwargs["custom_llm_provider"] = "openrouter"
+            kwargs["api_base"] = candidate.get("api_base", "https://openrouter.ai/api/v1")
+            if "extra_headers" not in kwargs or not isinstance(kwargs["extra_headers"], dict):
+                kwargs["extra_headers"] = {}
+            kwargs["extra_headers"]["HTTP-Referer"] = "https://github.com/Phanikartheek/TRIP-PLANNER"
+            kwargs["extra_headers"]["X-Title"] = "AI Trip Planner"
         elif "custom_llm_provider" in kwargs:
             kwargs.pop("custom_llm_provider", None)
 
         if cand_idx > 0:
             prev_model = valid_candidates[cand_idx - 1]["model"]
-            print(f"[SAFE_LITELLM] >>> ACTIVATING FALLBACK PROVIDER #{cand_idx}: '{active_model}' (from '{prev_model}') <<<", flush=True)
+            is_switch_to_openrouter = active_model.startswith("openrouter/") and not prev_model.startswith("openrouter/")
+            if is_switch_to_openrouter:
+                print(
+                    f"\n[SAFE_LITELLM] >>> GROQ EXHAUSTED / RATE-LIMITED: AUTOMATICALLY SWITCHING TO OPENROUTER PROVIDER: '{active_model}' <<<\n",
+                    flush=True,
+                )
+                import logging
+                logging.getLogger("trip_planner.crew").warning(
+                    "[AI Fallback] Groq models rate-limited or exhausted (%s). Seamlessly switched to OpenRouter fallback (%s).",
+                    prev_model,
+                    active_model,
+                )
+            else:
+                print(f"[SAFE_LITELLM] >>> ACTIVATING FALLBACK PROVIDER #{cand_idx}: '{active_model}' (from '{prev_model}') <<<", flush=True)
             try:
                 from trip_planner.api.metrics import metrics
                 metrics.record_provider_fallback(prev_model, active_model)
@@ -276,10 +321,28 @@ def _safe_litellm_completion(*args, **kwargs):
                     except Exception:
                         pass
 
+                    if active_model.startswith("groq/"):
+                        import re
+                        retry_m = re.search(r"try again in\s+([0-9.]+)\s*s", err_msg)
+                        cooldown_sec = float(retry_m.group(1)) if retry_m else 45.0
+                        _safe_litellm_completion._groq_rate_limited_until = time.time() + cooldown_sec
+
                     # If remaining valid candidate models exist, advance immediately to next candidate
                     has_more = any(c["model"] not in known_invalid for c in valid_candidates[cand_idx + 1:])
                     if has_more:
-                        print(f"[SAFE_LITELLM] Rate limit on '{active_model}' ({err_msg[:90]}...). Advancing to next fallback candidate...", flush=True)
+                        next_cand = next(c for c in valid_candidates[cand_idx + 1:] if c["model"] not in known_invalid)
+                        if next_cand["model"].startswith("openrouter/") and active_model.startswith("groq/"):
+                            print(
+                                f"[SAFE_LITELLM] Groq rate limit / quota exceeded on '{active_model}' ({err_msg[:90]}...). "
+                                f"Advancing immediately to OpenRouter fallback: '{next_cand['model']}'...",
+                                flush=True,
+                            )
+                        else:
+                            print(
+                                f"[SAFE_LITELLM] Rate limit on '{active_model}' ({err_msg[:90]}...). "
+                                f"Advancing to next fallback candidate: '{next_cand['model']}'...",
+                                flush=True,
+                            )
                         break
 
                 is_retryable = (is_tool_fail or is_rate_limit or is_parse_fail or is_max_tokens) and attempt < max_retries - 1
@@ -409,25 +472,23 @@ class TripPlannerCrew:
             model = "openrouter/nousresearch/hermes-3-llama-3.1-405b"
         elif raw_model:
             model = raw_model
-        elif or_key and len(or_key) >= 10:
-            # Auto-default to Hermes 3 when OpenRouter key is configured
-            model = "openrouter/nousresearch/hermes-3-llama-3.1-70b"
         else:
+            # Primary default is always Groq
             model = "groq/qwen/qwen3.8-27b"
 
         if model.startswith("openrouter/"):
             if not or_key or len(or_key) < 10:
-                # If Hermes 3 was requested but OpenRouter key is missing, fallback gracefully to Groq
+                # If OpenRouter was requested but OpenRouter key is missing, fallback gracefully to Groq
                 if groq_key and len(groq_key) >= 5:
                     import logging
                     logging.getLogger("trip_planner.crew").warning(
-                        "OPENROUTER_API_KEY not found for Hermes 3 (%s). Falling back gracefully to Groq (qwen3.8-27b).",
-                        model
+                        "OPENROUTER_API_KEY not found for model (%s). Falling back gracefully to Groq (qwen3.8-27b).",
+                        model,
                     )
                     return LLM(model="groq/qwen/qwen3.8-27b", api_key=groq_key, temperature=0.2)
                 raise ValueError(
                     "OPENROUTER_API_KEY is not set. "
-                    "Please set OPENROUTER_API_KEY in your .env file to use Hermes 3."
+                    "Please set OPENROUTER_API_KEY in your .env file or environment."
                 )
             return LLM(
                 model=model,
@@ -437,6 +498,18 @@ class TripPlannerCrew:
             )
         else:
             if not groq_key or len(groq_key) < 5:
+                # If Groq key is missing but OpenRouter key exists, fallback to OpenRouter
+                if or_key and len(or_key) >= 10:
+                    import logging
+                    logging.getLogger("trip_planner.crew").warning(
+                        "GROQ_API_KEY not set. Using OpenRouter fallback (openrouter/meta-llama/llama-3.3-70b-instruct)."
+                    )
+                    return LLM(
+                        model="openrouter/meta-llama/llama-3.3-70b-instruct",
+                        api_key=or_key,
+                        api_base="https://openrouter.ai/api/v1",
+                        temperature=0.2,
+                    )
                 raise ValueError(
                     "GROQ_API_KEY environment variable is not set. "
                     "Please set GROQ_API_KEY in your .env file or environment."

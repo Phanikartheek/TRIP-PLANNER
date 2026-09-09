@@ -212,3 +212,78 @@ def test_priority_5_daily_plan_quota_rate_limiting(client: TestClient, tmp_path:
         assert res.headers["Retry-After"] == "86400"
         assert f"Daily limit of {DAILY_PLAN_LIMIT} trip plans reached" in res.json()["detail"]
         mock_exec.assert_not_called()
+
+
+def test_groq_to_openrouter_fallback_candidate_chain():
+    """Verify fallback chain: Groq primary + Groq fallbacks, and OpenRouter only if key present."""
+    from trip_planner.crew import _get_fallback_candidates
+
+    # Case 1: No OpenRouter key -> only Groq models
+    with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test12345", "OPENROUTER_API_KEY": ""}, clear=False):
+        cands = _get_fallback_candidates("groq/qwen/qwen3.8-27b")
+        models = [c["model"] for c in cands]
+        assert models == [
+            "groq/qwen/qwen3.8-27b",
+            "groq/llama-3.1-8b-instant",
+            "groq/llama-3.3-70b-versatile",
+        ]
+        assert not any(c["model"].startswith("openrouter/") for c in cands)
+
+    # Case 2: OpenRouter key present -> appends OpenRouter fallback at the end
+    with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_test12345", "OPENROUTER_API_KEY": "sk-or-v1-valid-key-123456789"}, clear=False):
+        cands2 = _get_fallback_candidates("groq/qwen/qwen3.8-27b")
+        models2 = [c["model"] for c in cands2]
+        assert models2 == [
+            "groq/qwen/qwen3.8-27b",
+            "groq/llama-3.1-8b-instant",
+            "groq/llama-3.3-70b-versatile",
+            "openrouter/meta-llama/llama-3.3-70b-instruct",
+        ]
+        or_cand = cands2[-1]
+        assert or_cand["provider"] == "openrouter"
+        assert or_cand["api_base"] == "https://openrouter.ai/api/v1"
+        assert or_cand["api_key"] == "sk-or-v1-valid-key-123456789"
+
+
+def test_groq_rate_limit_switches_to_openrouter():
+    """Verify that when Groq models hit rate limits (429), it advances seamlessly to OpenRouter."""
+    from unittest.mock import MagicMock
+    import litellm
+    from trip_planner.crew import _safe_litellm_completion
+
+    metrics.reset()
+
+    # Mock litellm completion to raise RateLimitError for Groq and succeed for OpenRouter
+    def mock_completion(*args, **kwargs):
+        model = kwargs.get("model", "")
+        if model.startswith("groq/"):
+            raise litellm.RateLimitError(
+                message=f"Rate limit exceeded on {model}: OTPM limit 1000",
+                model=model,
+                llm_provider="groq"
+            )
+        elif model.startswith("openrouter/"):
+            mock_choice = MagicMock()
+            mock_choice.message.content = "OpenRouter response"
+            mock_resp = MagicMock()
+            mock_resp.choices = [mock_choice]
+            return mock_resp
+        raise RuntimeError(f"Unexpected model: {model}")
+
+    with patch("trip_planner.crew._original_litellm_completion", side_effect=mock_completion), \
+         patch.dict(os.environ, {
+             "GROQ_API_KEY": "gsk_test12345",
+             "OPENROUTER_API_KEY": "sk-or-v1-valid-key-123456789",
+         }, clear=False):
+        # Reset invalid models cache if present
+        _safe_litellm_completion._invalid_models = set()
+        _safe_litellm_completion._groq_rate_limited_until = 0.0
+
+        res = _safe_litellm_completion(model="groq/qwen/qwen3.8-27b", messages=[{"role": "user", "content": "hi"}])
+        assert res.choices[0].message.content == "OpenRouter response"
+
+        # Check metrics
+        summary = metrics.get_metrics_summary()
+        assert summary["provider_rate_limits"] >= 1
+        assert summary["fallbacks_total"] >= 1
+
