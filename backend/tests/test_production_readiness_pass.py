@@ -30,6 +30,7 @@ def client(tmp_path: Path):
     yield test_client
     job_repo.db_path = orig_db
     db.DEFAULT_DB_PATH = orig_default
+    db.dispose_engine(test_db)
 
 
 def test_priority_1_fallback_metrics_tracking():
@@ -120,6 +121,7 @@ def test_priority_3_sqlalchemy_persistence_and_postgres_url_normalization(tmp_pa
     assert engine.dialect.name == "sqlite"
     db.init_db(db_path=sqlite_db)
     assert sqlite_db.exists()
+    db.dispose_engine(sqlite_db)
 
 
 def test_priority_4_auth_my_trips_and_claim(client: TestClient, tmp_path: Path):

@@ -14,9 +14,19 @@ from trip_planner.patterns.router import IntentClassificationResult, TripRouter,
 
 
 @pytest.fixture
-def client():
-    db.init_db()
-    return TestClient(app)
+def client(tmp_path):
+    from trip_planner.api.app import job_repo
+    test_db = tmp_path / "routing_test.db"
+    orig_db = getattr(job_repo, "db_path", None)
+    job_repo.db_path = test_db
+    orig_default = db.DEFAULT_DB_PATH
+    db.DEFAULT_DB_PATH = test_db
+    db.init_db(db_path=test_db)
+    test_client = TestClient(app)
+    yield test_client
+    job_repo.db_path = orig_db
+    db.DEFAULT_DB_PATH = orig_default
+    db.dispose_engine(test_db)
 
 
 def test_classify_new_trip_intent():
@@ -78,7 +88,10 @@ def test_smart_request_api_routes_new_trip(client, monkeypatch):
     assert data["status"] == "pending"
 
 
-def test_smart_request_api_routes_question(client):
+def test_smart_request_api_routes_question(client, monkeypatch):
+    async def mock_question_exec(*args, **kwargs):
+        pass
+    monkeypatch.setattr("trip_planner.api.app._execute_qa_job", mock_question_exec)
     res = client.post(
         "/api/smart-request",
         json={

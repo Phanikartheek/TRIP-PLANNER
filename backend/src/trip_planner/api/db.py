@@ -157,6 +157,7 @@ def get_session_factory(db_path: Path | str | None = None) -> sessionmaker:
     url = get_database_url(db_path)
     if url not in _sessionmakers:
         engine = get_engine(db_path)
+        Base.metadata.create_all(bind=engine)
         _sessionmakers[url] = sessionmaker(bind=engine, expire_on_commit=False)
     return _sessionmakers[url]
 

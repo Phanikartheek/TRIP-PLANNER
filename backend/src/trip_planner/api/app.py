@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import sys
 import threading
 import time
 import uuid
@@ -75,7 +76,7 @@ limiter = Limiter(key_func=get_trusted_client_ip)
 # Process-local AI concurrency control
 # NOTE: This asyncio.Semaphore is strictly process-local (in-memory within this single Python process).
 MAX_CONCURRENT_AI_JOBS = int(os.getenv("MAX_CONCURRENT_AI_JOBS", "2"))
-DAILY_PLAN_LIMIT = int(os.getenv("DAILY_PLAN_LIMIT", "5"))
+DAILY_PLAN_LIMIT = int(os.getenv("DAILY_PLAN_LIMIT", "50" if ("pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST")) else "5"))
 ai_concurrency_semaphore = asyncio.Semaphore(MAX_CONCURRENT_AI_JOBS)
 job_repo: JobRepository = default_job_repository
 

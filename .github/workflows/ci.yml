@@ -33,6 +33,7 @@ jobs:
       - name: Run Test Suite
         env:
           PYTHONPATH: backend/src
+          DAILY_PLAN_LIMIT: "50"
         run: |
           pytest backend/tests/ -k "not test_crew" -v
 
