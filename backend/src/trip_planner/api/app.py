@@ -1240,13 +1240,14 @@ async def _execute_trip_job(job_id: str, inputs: dict[str, Any], dedup_key: str 
         err_text = str(e) or repr(e)
         logger.error(f"[Job: {job_id}] CrewAI pipeline execution failed: {err_text}", exc_info=True)
         safe_error = categorize_ai_error(e)
+        detailed_error = f"{safe_error} (details: {err_text})" if err_text else safe_error
         job_repo.update_job(
             job_id,
             status="failed",
             current_stage="failed",
             progress_percentage=0,
             message=safe_error,
-            error=safe_error,
+            error=detailed_error,
         )
         metrics.record_generation_failure(safe_error)
     finally:
@@ -1322,7 +1323,9 @@ async def _execute_revision_job(job_id: str, inputs: dict[str, Any]) -> None:
     except Exception as e:
         logger.error(f"[Job: {job_id}] Revision execution failed: {e}", exc_info=True)
         safe_error = categorize_ai_error(e)
-        job_repo.update_job(job_id, status="failed", error=safe_error)
+        err_text = str(e) or repr(e)
+        detailed_error = f"{safe_error} (details: {err_text})" if err_text else safe_error
+        job_repo.update_job(job_id, status="failed", error=detailed_error)
         metrics.record_generation_failure(safe_error)
     finally:
         metrics.dec_active_jobs()
@@ -1428,7 +1431,9 @@ async def _execute_qa_job(
     except Exception as e:
         logger.error(f"[Job: {job_id}] Destination Q&A failed: {e}", exc_info=True)
         safe_error = categorize_ai_error(e)
-        job_repo.update_job(job_id, status="failed", error=safe_error)
+        err_text = str(e) or repr(e)
+        detailed_error = f"{safe_error} (details: {err_text})" if err_text else safe_error
+        job_repo.update_job(job_id, status="failed", error=detailed_error)
         metrics.record_generation_failure(safe_error)
     finally:
         metrics.dec_active_jobs()
@@ -1934,7 +1939,7 @@ async def health_check():
         "service": "AI Trip Planner API",
         "version": "0.1.0",
         "groq_configured": has_api_key,
-        "default_model": os.getenv("TRIP_PLANNER_MODEL", "groq/openai/gpt-oss-120b"),
+        "default_model": os.getenv("TRIP_PLANNER_MODEL", "groq/qwen/qwen3.8-27b"),
     }
 
 

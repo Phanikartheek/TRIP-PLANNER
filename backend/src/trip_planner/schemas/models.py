@@ -29,7 +29,7 @@ def _validate_language_code(v: str) -> str:
 def clean_float(v: object, default: float = 0.0) -> float:
     if v is None:
         return default
-    if isinstance(v, (int, float)):
+    if isinstance(v, int | float):
         try:
             return float(v)
         except (ValueError, TypeError):
@@ -140,7 +140,7 @@ class TripPlanRequest(BaseModel):
 class CitySelection(BaseModel):
     """Output of the City Selection Expert."""
 
-    city: str = Field(..., description="The chosen primary city for the trip")
+    city: str = Field(default="Destination", description="The chosen primary city for the trip")
     cities_visited: list[str] | None = Field(
         default=None, description="Ordered list of cities visited in a multi-city trip"
     )
@@ -174,9 +174,27 @@ class CitySelection(BaseModel):
                 target = data["cities"][0]
             elif "recommended_city" in data and isinstance(data["recommended_city"], dict):
                 target = data["recommended_city"]
-            for key in ("destination", "selected_city", "primary_city", "recommended_city"):
-                if key in target and "city" not in target:
-                    target["city"] = target[key]
+            for key in (
+                "selected_destination",
+                "destination",
+                "destination_city",
+                "selected_city",
+                "primary_city",
+                "recommended_city",
+                "chosen_city",
+                "target_city",
+                "city_name",
+                "name",
+            ):
+                if key in target and ("city" not in target or not target.get("city")):
+                    target["city"] = str(target[key])
+
+            if "estimated_daily_cost" in target and "estimated_daily_budget" not in target:
+                target["estimated_daily_budget"] = target["estimated_daily_cost"]
+
+            if "weather_note" in target and "best_time_to_visit" not in target:
+                target["best_time_to_visit"] = target["weather_note"]
+
             return target
         return data
 

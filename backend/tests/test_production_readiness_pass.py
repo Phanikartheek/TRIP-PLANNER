@@ -36,13 +36,13 @@ def client(tmp_path: Path):
 def test_priority_1_fallback_metrics_tracking():
     """Verify that provider fallback occurrences are cleanly recorded in metrics."""
     metrics.reset()
-    metrics.record_provider_fallback("groq/qwen/qwen3.8-27b", "groq/openai/gpt-oss-120b")
-    metrics.record_provider_fallback("groq/openai/gpt-oss-120b", "openrouter/meta-llama/llama-3.3-70b-instruct")
+    metrics.record_provider_fallback("groq/qwen/qwen3.8-27b", "groq/llama-3.1-8b-instant")
+    metrics.record_provider_fallback("groq/llama-3.1-8b-instant", "groq/llama-3.3-70b-versatile")
 
     summary = metrics.get_metrics_summary()
     assert summary["fallbacks_total"] == 2
-    assert "groq/qwen/qwen3.8-27b -> groq/openai/gpt-oss-120b" in summary["fallbacks_by_transition"]
-    assert "groq/openai/gpt-oss-120b -> openrouter/meta-llama/llama-3.3-70b-instruct" in summary["fallbacks_by_transition"]
+    assert "groq/qwen/qwen3.8-27b -> groq/llama-3.1-8b-instant" in summary["fallbacks_by_transition"]
+    assert "groq/llama-3.1-8b-instant -> groq/llama-3.3-70b-versatile" in summary["fallbacks_by_transition"]
 
 
 def test_priority_2_job_progress_stages_and_schema(client: TestClient, tmp_path: Path):

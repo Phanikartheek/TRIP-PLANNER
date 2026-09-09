@@ -52,22 +52,29 @@ def _get_fallback_candidates(initial_model: str) -> list[dict[str, Any]]:
     """
     Builds a prioritized list of model candidates to try if the primary model hits
     rate limits (OTPM/TPM/RPM), timeouts, or provider failures.
-    Verified available models on Groq:
-    - groq/qwen/qwen3.8-27b
-    - groq/openai/gpt-oss-120b (Separate rate limit pool)
-    - groq/openai/gpt-oss-20b  (Separate rate limit pool)
-    - groq/qwen/qwen3.6-27b
-    - OpenRouter models (if OPENROUTER_API_KEY configured)
+    Proven working Groq models:
+    - Primary: groq/qwen/qwen3.8-27b (or TRIP_PLANNER_MODEL)
+    - Fallback 1: groq/llama-3.1-8b-instant   (highest rate limits on Groq)
+    - Fallback 2: groq/llama-3.3-70b-versatile
+    - Fallback 3: openrouter/meta-llama/llama-3.3-70b-instruct (only if OPENROUTER_API_KEY is configured)
     """
     groq_key = os.environ.get("GROQ_API_KEY", "").strip()
     or_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
 
     env_fallbacks = os.environ.get("AI_FALLBACK_MODELS", "").strip()
-    fallback_models = [m.strip() for m in env_fallbacks.split(",") if m.strip()] if env_fallbacks else [
-        "groq/openai/gpt-oss-120b",
-        "groq/openai/gpt-oss-20b",
-        "groq/qwen/qwen3.6-27b",
-    ]
+    parsed_models = [m.strip() for m in env_fallbacks.split(",") if m.strip()] if env_fallbacks else []
+    # Explicitly filter out any obsolete or non-existent gpt-oss models or qwen3.6
+    sanitized_fallbacks = [m for m in parsed_models if "gpt-oss" not in m.lower() and "qwen3.6" not in m.lower()]
+
+    if not sanitized_fallbacks:
+        sanitized_fallbacks = [
+            "groq/llama-3.1-8b-instant",
+            "groq/llama-3.3-70b-versatile",
+        ]
+    else:
+        for proven in ("groq/llama-3.1-8b-instant", "groq/llama-3.3-70b-versatile"):
+            if proven not in sanitized_fallbacks:
+                sanitized_fallbacks.append(proven)
 
     candidates = []
     # 1. Primary candidate
@@ -77,8 +84,8 @@ def _get_fallback_candidates(initial_model: str) -> list[dict[str, Any]]:
     })
 
     # 2. Append fallback models that differ from initial_model
-    for fb in fallback_models:
-        if fb.lower() != initial_model.lower():
+    for fb in sanitized_fallbacks:
+        if fb.lower() != initial_model.lower() and not any(c["model"].lower() == fb.lower() for c in candidates):
             cand = {"model": fb}
             if fb.startswith("openrouter/"):
                 if or_key:
@@ -89,7 +96,7 @@ def _get_fallback_candidates(initial_model: str) -> list[dict[str, Any]]:
                 cand["api_key"] = groq_key
                 candidates.append(cand)
 
-    # 3. If OpenRouter key is configured and not yet added, add an OpenRouter fallback
+    # 3. Fallback 3: OpenRouter model only if OPENROUTER_API_KEY is configured
     if or_key and not any(c["model"].startswith("openrouter/") for c in candidates):
         candidates.append({
             "model": "openrouter/meta-llama/llama-3.3-70b-instruct",
@@ -104,12 +111,19 @@ def _safe_litellm_completion(*args, **kwargs):
     args_list = list(args)
     if len(args_list) > 0 and isinstance(args_list[0], str) and "model" not in kwargs:
         kwargs["model"] = args_list.pop(0)
-    if len(args_list) > 0 and isinstance(args_list[0], (list, tuple)) and "messages" not in kwargs:
+    if len(args_list) > 0 and isinstance(args_list[0], list | tuple) and "messages" not in kwargs:
         kwargs["messages"] = list(args_list.pop(0))
     args = tuple(args_list)
 
     initial_model = kwargs.get("model", "groq/qwen/qwen3.8-27b")
     candidates = _get_fallback_candidates(initial_model)
+
+    if not hasattr(_safe_litellm_completion, "_invalid_models"):
+        _safe_litellm_completion._invalid_models = set()
+    known_invalid: set[str] = _safe_litellm_completion._invalid_models
+    valid_candidates = [c for c in candidates if c["model"] not in known_invalid]
+    if not valid_candidates:
+        valid_candidates = candidates[:1]
 
     if "tools" in kwargs and isinstance(kwargs["tools"], list):
         # Trim function descriptions
@@ -172,10 +186,33 @@ def _safe_litellm_completion(*args, **kwargs):
 
         kwargs["messages"] = clean_messages
 
-    # Enforce max_tokens = 3500 so LLM structured JSON output is complete while staying within limits
-    kwargs["max_tokens"] = 3500
+    # For action/tool-calling iterations, 150 tokens is plenty and avoids early quota consumption.
+    # For schema conversions (instructor/converter) or final responses, 2500 tokens ensures full JSON output!
+    if "tools" in kwargs and kwargs["tools"]:
+        tool_names = [
+            t.get("function", {}).get("name", "")
+            for t in kwargs["tools"]
+            if isinstance(t, dict) and "function" in t
+        ]
+        is_action_tool = any(
+            name in ("web_search", "scrape_website", "read_website_content", "duckduckgo_search")
+            for name in tool_names
+        )
+        if is_action_tool:
+            kwargs["max_tokens"] = 150
+        else:
+            existing_max = kwargs.get("max_tokens")
+            if not existing_max or existing_max < 2500:
+                kwargs["max_tokens"] = 2500
+    else:
+        existing_max = kwargs.get("max_tokens")
+        if not existing_max or existing_max < 2500:
+            kwargs["max_tokens"] = 2500
 
-    for cand_idx, candidate in enumerate(candidates):
+    last_error: str | None = None
+    last_failed_model: str | None = None
+
+    for cand_idx, candidate in enumerate(valid_candidates):
         active_model = candidate["model"]
         kwargs["model"] = active_model
         if "api_key" in candidate and candidate["api_key"]:
@@ -185,8 +222,16 @@ def _safe_litellm_completion(*args, **kwargs):
         elif "api_base" in kwargs and not active_model.startswith("openrouter/"):
             del kwargs["api_base"]
 
+        # Ensure correct provider routing in LiteLLM
+        if active_model.startswith("groq/"):
+            kwargs["custom_llm_provider"] = "groq"
+        elif active_model.startswith("openrouter/"):
+            kwargs["custom_llm_provider"] = "openrouter"
+        elif "custom_llm_provider" in kwargs:
+            kwargs.pop("custom_llm_provider", None)
+
         if cand_idx > 0:
-            prev_model = candidates[cand_idx - 1]["model"]
+            prev_model = valid_candidates[cand_idx - 1]["model"]
             print(f"[SAFE_LITELLM] >>> ACTIVATING FALLBACK PROVIDER #{cand_idx}: '{active_model}' (from '{prev_model}') <<<", flush=True)
             try:
                 from trip_planner.api.metrics import metrics
@@ -194,7 +239,7 @@ def _safe_litellm_completion(*args, **kwargs):
             except Exception:
                 pass
 
-        max_retries = 2 if len(candidates) > 1 else 3
+        max_retries = 8
         tool_use_fail_count = 0
 
         for attempt in range(max_retries):
@@ -209,12 +254,20 @@ def _safe_litellm_completion(*args, **kwargs):
                 return res
             except Exception as e:
                 err_msg = str(e)
+                last_error = err_msg
+                last_failed_model = active_model
+
+                # If model is unavailable on this key/account, mark it and transition immediately
+                if "does not exist" in err_msg.lower() or "model_not_found" in err_msg.lower() or "not_found_error" in err_msg.lower():
+                    print(f"[SAFE_LITELLM] Model '{active_model}' is unavailable on provider ({err_msg[:90]}...). Marking invalid.", flush=True)
+                    known_invalid.add(active_model)
+                    break
+
                 is_tool_fail = ("tool_use_failed" in err_msg or "Failed to call a function" in err_msg) and "max_tokens" not in err_msg
                 is_otpm_limit = "otpm" in err_msg.lower() or "reduce max_tokens" in err_msg.lower() or "output tokens per minute" in err_msg.lower()
                 is_rate_limit = is_otpm_limit or "rate_limit" in err_msg.lower() or "429" in err_msg or "tokens per minute" in err_msg.lower() or "tpm" in err_msg.lower() or "too large" in err_msg.lower()
                 is_parse_fail = "output_parse_failed" in err_msg.lower() or "parsing failed" in err_msg.lower()
                 is_max_tokens = ("output is incomplete" in err_msg.lower() or "finish_reason: length" in err_msg.lower()) and not is_rate_limit
-                is_retryable = (is_tool_fail or is_rate_limit or is_parse_fail or is_max_tokens) and attempt < max_retries - 1
 
                 if is_rate_limit:
                     try:
@@ -222,6 +275,14 @@ def _safe_litellm_completion(*args, **kwargs):
                         metrics.record_provider_429()
                     except Exception:
                         pass
+
+                    # If remaining valid candidate models exist, advance immediately to next candidate
+                    has_more = any(c["model"] not in known_invalid for c in valid_candidates[cand_idx + 1:])
+                    if has_more:
+                        print(f"[SAFE_LITELLM] Rate limit on '{active_model}' ({err_msg[:90]}...). Advancing to next fallback candidate...", flush=True)
+                        break
+
+                is_retryable = (is_tool_fail or is_rate_limit or is_parse_fail or is_max_tokens) and attempt < max_retries - 1
 
                 if is_retryable:
                     try:
@@ -231,34 +292,53 @@ def _safe_litellm_completion(*args, **kwargs):
                         pass
 
                     if is_tool_fail:
-                        tool_use_fail_count += 1
-                        if "tool_choice" in kwargs:
-                            del kwargs["tool_choice"]
-                        if "messages" in kwargs and isinstance(kwargs["messages"], list):
-                            kwargs["messages"].append({
-                                "role": "user",
-                                "content": "You MUST use the search tool to look up real information. Do NOT answer from your own knowledge. Call the search function now."
-                            })
-                        wait_time = round(2.5 + random.uniform(0.2, 0.8), 2)
-                        print(f"[SAFE_LITELLM] tool_use_fail on {active_model} (attempt {attempt+1}/{max_retries}). Retrying in {wait_time}s...", flush=True)
-                        if tool_use_fail_count >= 2:
-                            if "tools" in kwargs:
-                                del kwargs["tools"]
+                        # Check if active tools are search tools before injecting search prompt
+                        cur_tool_names = [
+                            t.get("function", {}).get("name", "")
+                            for t in kwargs.get("tools", [])
+                            if isinstance(t, dict) and "function" in t
+                        ]
+                        has_search = any(
+                            n in ("web_search", "scrape_website", "read_website_content", "duckduckgo_search")
+                            for n in cur_tool_names
+                        )
+                        if has_search:
+                            tool_use_fail_count += 1
                             if "tool_choice" in kwargs:
                                 del kwargs["tool_choice"]
                             if "messages" in kwargs and isinstance(kwargs["messages"], list):
-                                kwargs["messages"] = [m for m in kwargs["messages"] if not (isinstance(m, dict) and "MUST use the search tool" in str(m.get("content", "")))]
+                                kwargs["messages"].append({
+                                    "role": "user",
+                                    "content": "You MUST use the search tool to look up real information. Do NOT answer from your own knowledge. Call the search function now."
+                                })
+                            wait_time = round(2.0 + random.uniform(0.2, 0.5), 2)
+                            print(f"[SAFE_LITELLM] tool_use_fail on {active_model} (attempt {attempt+1}/{max_retries}). Retrying in {wait_time}s...", flush=True)
+                            if tool_use_fail_count >= 2:
+                                if "tools" in kwargs:
+                                    del kwargs["tools"]
+                                if "tool_choice" in kwargs:
+                                    del kwargs["tool_choice"]
+                                if "messages" in kwargs and isinstance(kwargs["messages"], list):
+                                    kwargs["messages"] = [m for m in kwargs["messages"] if not (isinstance(m, dict) and "MUST use the search tool" in str(m.get("content", "")))]
+                        else:
+                            wait_time = round(1.5 + random.uniform(0.1, 0.4), 2)
+                            print(f"[SAFE_LITELLM] schema format error on {active_model} (attempt {attempt+1}/{max_retries}). Retrying in {wait_time}s...", flush=True)
                     elif is_max_tokens:
-                        kwargs["max_tokens"] = 3500
+                        kwargs["max_tokens"] = 3000
                         wait_time = round(1.5 + random.uniform(0.1, 0.5), 2)
                         print(f"[SAFE_LITELLM] max_tokens on {active_model} (attempt {attempt+1}/{max_retries}). Retrying in {wait_time}s...", flush=True)
                         if "messages" in kwargs and isinstance(kwargs["messages"], list):
                             kwargs["messages"] = _shrink_messages_further(kwargs["messages"])
                     else:
                         tool_use_fail_count = 0
-                        if is_otpm_limit:
-                            kwargs["max_tokens"] = 950
-                        base_wait = 2.0 * (2 ** attempt)
+                        import re
+                        retry_m = re.search(r"try again in\s+([0-9.]+)\s*s", err_msg)
+                        base_wait = 2.0 * (1.5 ** attempt)
+                        if retry_m:
+                            needed = float(retry_m.group(1))
+                            if needed <= 60.0:
+                                base_wait = max(base_wait, needed + 1.5)
+
                         wait_time = round(base_wait + random.uniform(0.2, 0.8), 2)
                         print(f"[SAFE_LITELLM] Rate limit or parse failure on {active_model} ({err_msg[:90]}...). Backing off {wait_time}s...", flush=True)
                         if "messages" in kwargs and isinstance(kwargs["messages"], list):
@@ -268,8 +348,9 @@ def _safe_litellm_completion(*args, **kwargs):
                     print(f"[SAFE_LITELLM] Model '{active_model}' exhausted attempts ({err_msg[:100]}...). Transitioning to fallback...", flush=True)
                     break
 
-    print(f"[SAFE_LITELLM] All {len(candidates)} candidate providers exhausted. Raising fallback exhaustion error.", flush=True)
-    raise RuntimeError(f"All AI providers (tried {len(candidates)} models including fallback) are currently experiencing peak demand. Please wait a moment and try again.")
+    print(f"[SAFE_LITELLM] All {len(valid_candidates)} candidate providers exhausted. Last error on '{last_failed_model}': {last_error}", flush=True)
+    details = f" (last error on {last_failed_model}: {last_error})" if last_error else ""
+    raise RuntimeError(f"All AI providers (tried {len(valid_candidates)} models including fallback) are currently experiencing peak demand. Please wait a moment and try again.{details}")
 
 litellm.completion = _safe_litellm_completion
 if hasattr(litellm, "main"):

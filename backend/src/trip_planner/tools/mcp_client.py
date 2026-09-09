@@ -32,7 +32,7 @@ class MCPToolAdapter(BaseTool):
             return f"Error: MCP tool {self.name} has no execution handler configured."
         try:
             result = self.mcp_call_fn(self.name, kwargs)
-            if isinstance(result, (dict, list)):
+            if isinstance(result, dict | list):
                 return json.dumps(result, indent=2)
             return str(result)
         except Exception as e:
